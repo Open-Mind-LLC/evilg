@@ -10,6 +10,12 @@ import (
 	"github.com/kgretzky/evilginx2/log"
 )
 
+const (
+	BLACKLIST_MODE_FULL   = 0
+	BLACKLIST_MODE_UNAUTH = 1
+	BLACKLIST_MODE_OFF    = 2
+)
+
 type BlockIP struct {
 	ipv4 net.IP
 	mask *net.IPNet
@@ -19,7 +25,7 @@ type Blacklist struct {
 	ips        map[string]*BlockIP
 	masks      []*BlockIP
 	configPath string
-	verbose    bool
+	mode       int
 }
 
 func NewBlacklist(path string) (*Blacklist, error) {
@@ -32,7 +38,7 @@ func NewBlacklist(path string) (*Blacklist, error) {
 	bl := &Blacklist{
 		ips:        make(map[string]*BlockIP),
 		configPath: path,
-		verbose:    true,
+		mode:       BLACKLIST_MODE_OFF,
 	}
 
 	fs := bufio.NewScanner(f)
@@ -65,12 +71,8 @@ func NewBlacklist(path string) (*Blacklist, error) {
 		}
 	}
 
-	log.Info("blacklist: loaded %d ip addresses and %d ip masks", len(bl.ips), len(bl.masks))
+	log.Info("blacklist: loaded %d ip addresses or ip masks", len(bl.ips)+len(bl.masks))
 	return bl, nil
-}
-
-func (bl *Blacklist) GetStats() (int, int) {
-	return len(bl.ips), len(bl.masks)
 }
 
 func (bl *Blacklist) AddIP(ip string) error {
@@ -115,12 +117,4 @@ func (bl *Blacklist) IsBlacklisted(ip string) bool {
 		}
 	}
 	return false
-}
-
-func (bl *Blacklist) SetVerbose(verbose bool) {
-	bl.verbose = verbose
-}
-
-func (bl *Blacklist) IsVerbose() bool {
-	return bl.verbose
 }
