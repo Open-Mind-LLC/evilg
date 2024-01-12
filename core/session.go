@@ -3,7 +3,8 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/go-telegram-bot-api/telegram-bot-api"
+	"log"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/kgretzky/evilginx2/database"
 )
 
