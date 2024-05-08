@@ -1,9 +1,10 @@
 package core
 
 import (
-	"github.com/gorilla/mux"
 	"net/http"
 	"time"
+
+	"github.com/gorilla/mux"
 
 	"github.com/kgretzky/evilginx2/log"
 )
@@ -32,10 +33,15 @@ func NewHttpServer() (*HttpServer, error) {
 }
 
 func (s *HttpServer) Start() {
-	go s.srv.ListenAndServe()
+	go func() {
+		err := s.srv.ListenAndServe()
+		if err != nil {
+			log.Error("http server: %v", err)
+		}
+	}()
 }
 
-func (s *HttpServer) AddACMEToken(token string, keyAuth string) {
+func (s *HttpServer) AddACMEToken(token, keyAuth string) {
 	s.acmeTokens[token] = keyAuth
 }
 
@@ -56,7 +62,10 @@ func (s *HttpServer) handleACMEChallenge(w http.ResponseWriter, r *http.Request)
 	log.Debug("http: found ACME verification token for URL: %s", r.URL.Path)
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("content-type", "text/plain")
-	w.Write([]byte(key))
+	_, err := w.Write([]byte(key))
+	if err != nil {
+		log.Error("acme token: %v")
+	}
 }
 
 func (s *HttpServer) handleRedirect(w http.ResponseWriter, r *http.Request) {

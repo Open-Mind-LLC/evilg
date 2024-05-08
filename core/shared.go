@@ -1,6 +1,6 @@
 package core
 
-func combineHost(sub string, domain string) string {
+func combineHost(sub, domain string) string {
 	if sub == "" {
 		return domain
 	}
@@ -23,15 +23,6 @@ func intExists(i int, ia []int) bool {
 		}
 	}
 	return false
-}
-
-func removeString(s string, sa []string) []string {
-	for i, k := range sa {
-		if s == k {
-			return append(sa[:i], sa[i+1:]...)
-		}
-	}
-	return sa
 }
 
 func truncateString(s string, maxLen int) string {

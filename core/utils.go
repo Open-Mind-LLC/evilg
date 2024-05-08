@@ -5,11 +5,16 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+
+	"github.com/kgretzky/evilginx2/log"
 )
 
 func GenRandomToken() string {
 	rdata := make([]byte, 64)
-	rand.Read(rdata)
+	_, err := rand.Read(rdata)
+	if err != nil {
+		log.Error("rand.Read: %v", err)
+	}
 	hash := sha256.Sum256(rdata)
 	token := fmt.Sprintf("%x", hash)
 	return token
@@ -20,7 +25,10 @@ func GenRandomString(n int) string {
 	b := make([]byte, n)
 	for i := range b {
 		t := make([]byte, 1)
-		rand.Read(t)
+		_, err := rand.Read(t)
+		if err != nil {
+			log.Error("rand.Read: %v", err)
+		}
 		b[i] = lb[int(t[0])%len(lb)]
 	}
 	return string(b)
@@ -31,7 +39,10 @@ func GenRandomAlphanumString(n int) string {
 	b := make([]byte, n)
 	for i := range b {
 		t := make([]byte, 1)
-		rand.Read(t)
+		_, err := rand.Read(t)
+		if err != nil {
+			log.Error("rand.Read: %v", err)
+		}
 		b[i] = lb[int(t[0])%len(lb)]
 	}
 	return string(b)

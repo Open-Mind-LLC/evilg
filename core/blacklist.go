@@ -76,6 +76,9 @@ func NewBlacklist(path string) (*Blacklist, error) {
 }
 
 func (bl *Blacklist) AddIP(ip string) error {
+	if ip == "127.0.0.1" {
+		return nil
+	}
 	if bl.IsBlacklisted(ip) {
 		return nil
 	}
@@ -103,6 +106,9 @@ func (bl *Blacklist) AddIP(ip string) error {
 }
 
 func (bl *Blacklist) IsBlacklisted(ip string) bool {
+	if ip == "127.0.0.1" {
+		return false
+	}
 	ipv4 := net.ParseIP(ip)
 	if ipv4 == nil {
 		return false
@@ -117,4 +123,13 @@ func (bl *Blacklist) IsBlacklisted(ip string) bool {
 		}
 	}
 	return false
+}
+
+func (bl *Blacklist) BlacklistIP(ip string) {
+	err := bl.AddIP(ip)
+	if err != nil {
+		log.Error("failed to blacklist ip address: %s - %s", ip, err)
+	} else {
+		log.Debug("blacklisted ip address: %s", ip)
+	}
 }

